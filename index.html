@@ -1,0 +1,1544 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Suno 鉴伪系统 - 纯前端边缘计算版</title>
+    <meta name="description" content="基于 WebAssembly 与 ONNX Runtime Web 的纯前端边缘计算 Suno 音频检测系统，100% 本地运算，保护隐私。">
+    <!-- Fonts: Geist (sans) + JetBrains Mono (mono) -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- ONNX Runtime Web -->
+    <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap');
+
+        :root {
+            --bg-dark: #09090b;
+            --bg-card: rgba(24, 24, 27, 0.85);
+            --bg-card-hover: rgba(30, 30, 35, 0.95);
+            --border-color: rgba(255, 255, 255, 0.06);
+            --text-primary: #fafafa;
+            --text-secondary: #71717a;
+            --text-tertiary: #52525b;
+            --accent: #10b981;
+            --accent-dim: rgba(16, 185, 129, 0.12);
+            --danger: #ef4444;
+            --danger-dim: rgba(239, 68, 68, 0.12);
+            --mono: 'JetBrains Mono', 'SF Mono', 'Fira Code', monospace;
+            --font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            background-color: var(--bg-dark);
+            color: var(--text-primary);
+            font-family: var(--font-family);
+            min-height: 100dvh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: flex-start;
+            overflow-x: hidden;
+            padding: 2rem 1rem;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 720px;
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+        }
+
+        header {
+            text-align: left;
+            margin-bottom: 0.5rem;
+        }
+
+        h1 {
+            font-size: 1.75rem;
+            font-weight: 700;
+            color: var(--text-primary);
+            letter-spacing: -0.5px;
+            margin-bottom: 0.25rem;
+        }
+
+        .subtitle {
+            color: var(--text-secondary);
+            font-size: 0.85rem;
+            font-weight: 400;
+            font-family: var(--mono);
+        }
+
+        /* Model status bar */
+        .status-bar {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 0.75rem 1rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.8rem;
+            font-family: var(--mono);
+        }
+
+        .status-indicator {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background-color: var(--danger);
+            transition: background-color 0.3s ease;
+            flex-shrink: 0;
+        }
+
+        .dot.loaded {
+            background-color: var(--accent);
+        }
+
+        /* Upload area */
+        .dropzone {
+            background: var(--bg-card);
+            border: 1px dashed rgba(255, 255, 255, 0.08);
+            border-radius: 12px;
+            padding: 3.5rem 2rem;
+            text-align: center;
+            cursor: pointer;
+            transition: border-color 0.25s ease, background 0.25s ease;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .dropzone:hover {
+            border-color: rgba(255, 255, 255, 0.18);
+            background: var(--bg-card-hover);
+        }
+
+        .dropzone.dragover {
+            border-color: var(--accent);
+            background: rgba(16, 185, 129, 0.04);
+        }
+
+        .upload-icon {
+            width: 48px;
+            height: 48px;
+            border-radius: 12px;
+            background: rgba(255, 255, 255, 0.04);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 0.25rem;
+        }
+
+        .upload-icon svg {
+            width: 24px;
+            height: 24px;
+            stroke: var(--text-secondary);
+            fill: none;
+            stroke-width: 1.5;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+
+        .upload-title {
+            font-size: 1rem;
+            font-weight: 600;
+        }
+
+        .upload-desc {
+            color: var(--text-secondary);
+            font-size: 0.8rem;
+        }
+
+        .upload-cta {
+            color: var(--accent);
+            font-size: 0.8rem;
+            font-weight: 500;
+        }
+
+        /* Hidden inputs */
+        input[type="file"] {
+            display: none;
+        }
+
+        /* Progress Card */
+        .progress-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 1.25rem;
+            display: none;
+            flex-direction: column;
+            gap: 0.75rem;
+        }
+
+        .progress-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.85rem;
+        }
+
+        .progress-bar-container {
+            width: 100%;
+            height: 4px;
+            background: rgba(255, 255, 255, 0.04);
+            border-radius: 2px;
+            overflow: hidden;
+        }
+
+        .progress-bar-fill {
+            width: 0%;
+            height: 100%;
+            background: var(--accent);
+            border-radius: 2px;
+            transition: width 0.3s ease;
+        }
+
+        .progress-log {
+            font-family: var(--mono);
+            background: rgba(0, 0, 0, 0.35);
+            border-radius: 6px;
+            padding: 0.75rem 1rem;
+            font-size: 0.72rem;
+            color: var(--accent);
+            max-height: 140px;
+            overflow-y: auto;
+            border: 1px solid rgba(255, 255, 255, 0.03);
+            line-height: 1.6;
+        }
+
+        /* Result Dashboard */
+        .result-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 2rem 1.5rem;
+            display: none;
+            grid-template-columns: 1fr;
+            gap: 2rem;
+            animation: fadeIn 0.4s ease;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(6px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        @media (min-width: 600px) {
+            .result-card {
+                grid-template-columns: 180px 1fr;
+            }
+        }
+
+        .gauge-section {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 0.75rem;
+        }
+
+        .gauge-container {
+            position: relative;
+            width: 160px;
+            height: 160px;
+        }
+
+        .gauge-center-text {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+        }
+
+        .gauge-percent {
+            font-size: 2rem;
+            font-weight: 700;
+            font-variant-numeric: tabular-nums;
+        }
+
+        .gauge-label {
+            font-size: 0.65rem;
+            color: var(--text-tertiary);
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            font-family: var(--mono);
+            margin-top: 2px;
+        }
+
+        .report-section {
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            gap: 1.25rem;
+        }
+
+        .verdict-badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 0.35rem 0.75rem;
+            border-radius: 6px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            gap: 0.4rem;
+            width: fit-content;
+            font-family: var(--mono);
+        }
+
+        .verdict-badge.ai {
+            background: var(--danger-dim);
+            color: var(--danger);
+            border: 1px solid rgba(239, 68, 68, 0.15);
+        }
+
+        .verdict-badge.human {
+            background: var(--accent-dim);
+            color: var(--accent);
+            border: 1px solid rgba(16, 185, 129, 0.15);
+        }
+
+        .report-title {
+            font-size: 1.15rem;
+            font-weight: 700;
+            margin-bottom: 0.25rem;
+        }
+
+        .report-text {
+            color: var(--text-secondary);
+            font-size: 0.85rem;
+            line-height: 1.65;
+            max-width: 50ch;
+        }
+
+        .prob-bars {
+            display: flex;
+            flex-direction: column;
+            gap: 0.6rem;
+            margin-top: 0.5rem;
+        }
+
+        .prob-row {
+            display: flex;
+            flex-direction: column;
+            gap: 0.2rem;
+        }
+
+        .prob-info {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+        }
+
+        .prob-info span:last-child {
+            font-family: var(--mono);
+            font-size: 0.75rem;
+            color: var(--text-primary);
+        }
+
+        .prob-bar-track {
+            height: 4px;
+            background: rgba(255, 255, 255, 0.04);
+            border-radius: 2px;
+            overflow: hidden;
+        }
+
+        .prob-bar-fill {
+            height: 100%;
+            border-radius: 2px;
+            transition: width 0.8s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        .prob-bar-fill.ai {
+            background: var(--danger);
+        }
+
+        .prob-bar-fill.human {
+            background: var(--accent);
+        }
+
+        /* Detail card for file specs */
+        .specs-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 0.75rem;
+            padding-top: 1rem;
+            border-top: 1px solid var(--border-color);
+            font-size: 0.8rem;
+        }
+
+        .spec-item {
+            display: flex;
+            flex-direction: column;
+            gap: 0.15rem;
+        }
+
+        .spec-label {
+            color: var(--text-tertiary);
+            font-size: 0.65rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            font-family: var(--mono);
+        }
+
+        .spec-val {
+            font-weight: 600;
+            font-variant-numeric: tabular-nums;
+        }
+
+        /* Collapse Section for Features */
+        .features-collapse {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            overflow: hidden;
+            display: none;
+        }
+
+        .collapse-header {
+            padding: 1rem 1.25rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: pointer;
+            user-select: none;
+            font-weight: 500;
+            font-size: 0.85rem;
+            transition: background 0.2s;
+        }
+
+        .collapse-header:hover {
+            background: rgba(255, 255, 255, 0.02);
+        }
+
+        .collapse-content {
+            display: none;
+            padding: 1rem 1.25rem;
+            border-top: 1px solid var(--border-color);
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .features-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-family: var(--mono);
+            font-size: 0.72rem;
+            text-align: left;
+        }
+
+        .features-table th, .features-table td {
+            padding: 0.4rem 0.5rem;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+        }
+
+        .features-table th {
+            color: var(--text-tertiary);
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            font-size: 0.6rem;
+        }
+
+        .features-table tr:hover {
+            background: rgba(255, 255, 255, 0.015);
+        }
+
+        .btn-select-model {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            color: var(--text-primary);
+            padding: 0.35rem 0.7rem;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.75rem;
+            font-family: var(--mono);
+            transition: background 0.2s, border-color 0.2s;
+        }
+
+        .btn-select-model:hover {
+            background: rgba(255, 255, 255, 0.08);
+            border-color: rgba(255, 255, 255, 0.15);
+        }
+
+        /* SVG Arrow */
+        .arrow-icon {
+            width: 16px;
+            height: 16px;
+            fill: none;
+            stroke: var(--text-tertiary);
+            stroke-width: 2;
+            transition: transform 0.2s ease;
+        }
+
+        .features-collapse.open .arrow-icon {
+            transform: rotate(180deg);
+        }
+
+        footer {
+            text-align: center;
+            color: var(--text-tertiary);
+            font-size: 0.7rem;
+            margin-top: 3rem;
+            font-family: var(--mono);
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            *, *::before, *::after {
+                animation-duration: 0.01ms !important;
+                animation-iteration-count: 1 !important;
+                transition-duration: 0.01ms !important;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Suno 鉴伪系统</h1>
+            <div class="subtitle">edge compute // 100% local // onnx-wasm</div>
+        </header>
+
+        <!-- Status Bar -->
+        <div class="status-bar">
+            <div class="status-indicator">
+                <div id="status-dot" class="dot"></div>
+                <span id="status-text">正在检查核心模型文件...</span>
+            </div>
+            <div style="display: flex; gap: 0.5rem; align-items: center;">
+                <button id="btn-load-model" class="btn-select-model" style="display: none;">加载模型</button>
+                <input type="file" id="model-file-input" accept=".onnx">
+            </div>
+        </div>
+
+        <!-- Drag & Drop Zone -->
+        <div class="dropzone" id="dropzone">
+            <div class="upload-icon">
+                <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" /></svg>
+            </div>
+            <div class="upload-title">拖拽音频文件至此</div>
+            <div class="upload-desc">支持 MP3 / WAV / FLAC / M4A</div>
+            <div class="upload-cta">或点击浏览文件</div>
+            <input type="file" id="audio-file-input" accept="audio/*">
+        </div>
+
+        <!-- Progress Card -->
+        <div class="progress-card" id="progress-card">
+            <div class="progress-header">
+                <span id="progress-title">正在载入音频...</span>
+                <span id="progress-percent">0%</span>
+            </div>
+            <div class="progress-bar-container">
+                <div class="progress-bar-fill" id="progress-bar-fill"></div>
+            </div>
+            <div class="progress-log" id="progress-log"></div>
+        </div>
+
+        <!-- Result Dashboard -->
+        <div class="result-card" id="result-card">
+            <div class="gauge-section">
+                <div class="gauge-container">
+                    <svg width="160" height="160" viewBox="0 0 200 200">
+                        <circle cx="100" cy="100" r="80" fill="none" stroke="rgba(255,255,255,0.04)" stroke-width="10" />
+                        <circle id="gauge-progress" cx="100" cy="100" r="80" fill="none" stroke="#ef4444" stroke-width="10" stroke-dasharray="502.6" stroke-dashoffset="502.6" stroke-linecap="round" transform="rotate(-90 100 100)" />
+                    </svg>
+                    <div class="gauge-center-text">
+                        <div class="gauge-percent" id="result-percent">0%</div>
+                        <div class="gauge-label" id="result-label">AI PROB</div>
+                    </div>
+                </div>
+            </div>
+            <div class="report-section">
+                <div>
+                    <div class="verdict-badge" id="result-badge">
+                        <span id="verdict-icon">&bull;</span>
+                        <span id="verdict-text">检测中</span>
+                    </div>
+                    <h2 class="report-title" id="report-title" style="margin-top: 0.75rem;">分析报告</h2>
+                    <p class="report-text" id="report-text">正在评估音频指纹...</p>
+                </div>
+
+                <div class="prob-bars">
+                    <div class="prob-row">
+                        <div class="prob-info">
+                            <span>AI 痕迹匹配度</span>
+                            <span id="prob-val-ai">0.00%</span>
+                        </div>
+                        <div class="prob-bar-track">
+                            <div class="prob-bar-fill ai" id="prob-bar-ai" style="width: 0%;"></div>
+                        </div>
+                    </div>
+                    <div class="prob-row">
+                        <div class="prob-info">
+                            <span>人为痕迹匹配度</span>
+                            <span id="prob-val-human">0.00%</span>
+                        </div>
+                        <div class="prob-bar-track">
+                            <div class="prob-bar-fill human" id="prob-bar-human" style="width: 0%;"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="specs-grid">
+                    <div class="spec-item">
+                        <span class="spec-label">FILE</span>
+                        <span class="spec-val" id="spec-name">-</span>
+                    </div>
+                    <div class="spec-item">
+                        <span class="spec-label">SAMPLE RATE</span>
+                        <span class="spec-val" id="spec-sr">-</span>
+                    </div>
+                    <div class="spec-item">
+                        <span class="spec-label">DURATION</span>
+                        <span class="spec-val" id="spec-duration">-</span>
+                    </div>
+                    <div class="spec-item">
+                        <span class="spec-label">COMPUTE</span>
+                        <span class="spec-val" id="spec-time">-</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Features Table -->
+        <div class="features-collapse" id="features-collapse">
+            <div class="collapse-header" id="collapse-header">
+                <span>声学特征矩阵 (61 dims)</span>
+                <svg class="arrow-icon" viewBox="0 0 24 24">
+                    <path d="M6 9l6 6 6-6"></path>
+                </svg>
+            </div>
+            <div class="collapse-content" id="collapse-content">
+                <table class="features-table">
+                    <thead>
+                        <tr>
+                            <th>Feature</th>
+                            <th>Description</th>
+                            <th>Value</th>
+                        </tr>
+                    </thead>
+                    <tbody id="features-tbody">
+                        <!-- Filled dynamically -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <footer>
+        <p>DanJuan Suno Detector &middot; ONNX Runtime Web &middot; Wasm</p>
+    </footer>
+
+    <script>
+        // Feature descriptions for transparency
+        const FEATURE_DESCRIPTIONS = {
+            'percussive_energy': '打击能量平均值 (RMS of Percussive)',
+            'hp_ratio': '谐波打击比 (Harmonic-to-Percussive Ratio)',
+            'spectral_flux_mean': '起音包络谱通量均值 (Onset Strength Mean)',
+            'spectral_flux_var': '起音包络谱通量方差 (Onset Strength Variance)',
+            'centroid_mean': '谱质心均值 (Spectral Centroid Mean)',
+            'centroid_std': '谱质心标准差 (Spectral Centroid Std)',
+            'rolloff_std': '谱滚降标准差 (Spectral Rolloff Std)'
+        };
+        for (let i = 1; i <= 20; i++) {
+            FEATURE_DESCRIPTIONS[`mfcc_${i}_mean`] = `第 ${i} 维梅尔倒谱均值 (MFCC ${i} Mean)`;
+            FEATURE_DESCRIPTIONS[`mfcc_${i}_std`] = `第 ${i} 维梅尔倒谱标准差 (MFCC ${i} Std)`;
+        }
+        for (let i = 1; i <= 6; i++) {
+            FEATURE_DESCRIPTIONS[`spectral_contrast_${i}_mean`] = `谱对比度第${i}带均值 (Octave Band ${i})`;
+            FEATURE_DESCRIPTIONS[`spectral_contrast_${i}_std`] = `谱对比度第${i}带标准差 (Octave Band ${i})`;
+        }
+        for (let i = 1; i <= 12; i++) {
+            FEATURE_DESCRIPTIONS[`chroma_${i}_mean`] = `色度第${i}类均值 (Pitch Class ${String.fromCharCode(64+i)})`;
+            FEATURE_DESCRIPTIONS[`chroma_${i}_std`] = `色度第${i}类标准差 (Pitch Class ${String.fromCharCode(64+i)})`;
+        }
+        FEATURE_DESCRIPTIONS['zcr_mean'] = '过零率均值 (Zero-Crossing Rate Mean)';
+        FEATURE_DESCRIPTIONS['zcr_std'] = '过零率标准差 (Zero-Crossing Rate Std)';
+        for (let i = 1; i <= 6; i++) {
+            const labels = ['五度圈 X', '五度圈 Y', '小三度 X', '小三度 Y', '大三度 X', '大三度 Y'];
+            FEATURE_DESCRIPTIONS[`tonnetz_${i}_mean`] = `音调网络${labels[i-1]}均值 (Tonnetz Axis ${i})`;
+            FEATURE_DESCRIPTIONS[`tonnetz_${i}_std`] = `音调网络${labels[i-1]}标准差 (Tonnetz Axis ${i})`;
+        }
+
+        // ==========================================
+        // UI & Global Variables
+        // ==========================================
+        let onnxSession = null;
+        const dropzone = document.getElementById('dropzone');
+        const audioInput = document.getElementById('audio-file-input');
+        const modelInput = document.getElementById('model-file-input');
+        const btnLoadModel = document.getElementById('btn-load-model');
+        const statusDot = document.getElementById('status-dot');
+        const statusText = document.getElementById('status-text');
+        const progressCard = document.getElementById('progress-card');
+        const progressTitle = document.getElementById('progress-title');
+        const progressPercent = document.getElementById('progress-percent');
+        const progressBarFill = document.getElementById('progress-bar-fill');
+        const progressLog = document.getElementById('progress-log');
+        const resultCard = document.getElementById('result-card');
+        const featuresCollapse = document.getElementById('features-collapse');
+        const collapseHeader = document.getElementById('collapse-header');
+        const collapseContent = document.getElementById('collapse-content');
+
+        // Check and load model on startup
+        window.addEventListener('load', async () => {
+            try {
+                // Try automatic loading
+                updateStatus('waiting', '正在载入本地 ONNX 鉴伪模型...');
+                onnxSession = await ort.InferenceSession.create('./suno_detector_model.onnx');
+                updateStatus('success', 'ONNX 鉴伪模型已就绪 (100% 边缘计算)');
+            } catch (e) {
+                console.warn("Auto model load failed (CORS or missing file): ", e);
+                updateStatus('failed', '无法自动载入模型 (可能是双击文件打开导致的跨域限制)。');
+                btnLoadModel.style.display = 'inline-block';
+            }
+        });
+
+        // Toggle features accordion
+        collapseHeader.addEventListener('click', () => {
+            const isOpen = featuresCollapse.classList.toggle('open');
+            collapseContent.style.display = isOpen ? 'block' : 'none';
+        });
+
+        // Trigger manual model loading
+        btnLoadModel.addEventListener('click', () => modelInput.click());
+        modelInput.addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            try {
+                updateStatus('waiting', `正在从本地加载模型: ${file.name}...`);
+                const arrayBuffer = await file.arrayBuffer();
+                onnxSession = await ort.InferenceSession.create(new Uint8Array(arrayBuffer));
+                updateStatus('success', `模型加载成功: ${file.name}`);
+                btnLoadModel.style.display = 'none';
+            } catch (err) {
+                console.error(err);
+                updateStatus('failed', `模型加载失败: ${err.message}`);
+            }
+        });
+
+        function updateStatus(state, msg) {
+            statusText.textContent = msg;
+            statusDot.className = 'dot';
+            statusDot.style.backgroundColor = '';
+            if (state === 'success') {
+                statusDot.classList.add('loaded');
+            } else if (state === 'waiting') {
+                statusDot.style.backgroundColor = '#f59e0b'; // amber
+            } else {
+                statusDot.style.backgroundColor = '#ef4444'; // red
+            }
+        }
+
+        // Drag and drop event handlers
+        dropzone.addEventListener('click', () => audioInput.click());
+        dropzone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropzone.classList.add('dragover');
+        });
+        dropzone.addEventListener('dragleave', () => {
+            dropzone.classList.remove('dragover');
+        });
+        dropzone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropzone.classList.remove('dragover');
+            const file = e.dataTransfer.files[0];
+            if (file) handleAudioFile(file);
+        });
+        audioInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) handleAudioFile(file);
+        });
+
+        // Progress logging helpers
+        function resetProgress(title) {
+            progressCard.style.display = 'flex';
+            resultCard.style.display = 'none';
+            featuresCollapse.style.display = 'none';
+            progressTitle.textContent = title;
+            progressPercent.textContent = '0%';
+            progressBarFill.style.width = '0%';
+            progressLog.innerHTML = '';
+        }
+
+        function updateProgress(percent, msg) {
+            progressPercent.textContent = `${percent}%`;
+            progressBarFill.style.width = `${percent}%`;
+            if (msg) {
+                const logItem = document.createElement('div');
+                logItem.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+                progressLog.appendChild(logItem);
+                progressLog.scrollTop = progressLog.scrollHeight;
+            }
+        }
+
+        // ==========================================
+        // Core Audio Processing (WASM / DSP)
+        // ==========================================
+
+        // Cooley-Tukey Radix-2 FFT/IFFT
+        function bitReverse(real, imag) {
+            const N = real.length;
+            let j = 0;
+            for (let i = 0; i < N; i++) {
+                if (i < j) {
+                    let tempRe = real[i]; real[i] = real[j]; real[j] = tempRe;
+                    let tempIm = imag[i]; imag[i] = imag[j]; imag[j] = tempIm;
+                }
+                let m = N >> 1;
+                while (m >= 1 && j >= m) {
+                    j -= m;
+                    m >>= 1;
+                }
+                j += m;
+            }
+        }
+
+        function fft(real, imag) {
+            const N = real.length;
+            bitReverse(real, imag);
+            for (let len = 2; len <= N; len <<= 1) {
+                const angle = -2 * Math.PI / len;
+                const wlenRe = Math.cos(angle);
+                const wlenIm = Math.sin(angle);
+                for (let i = 0; i < N; i += len) {
+                    let wRe = 1;
+                    let wIm = 0;
+                    const halfLen = len >> 1;
+                    for (let j = 0; j < halfLen; j++) {
+                        const u = i + j;
+                        const v = u + halfLen;
+                        const tRe = real[v] * wRe - imag[v] * wIm;
+                        const tIm = real[v] * wIm + imag[v] * wRe;
+                        real[v] = real[u] - tRe;
+                        imag[v] = imag[u] - tIm;
+                        real[u] += tRe;
+                        imag[u] += tIm;
+                        
+                        const nextWRe = wRe * wlenRe - wIm * wlenIm;
+                        const nextWIm = wRe * wlenIm + wIm * wlenRe;
+                        wRe = nextWRe;
+                        wIm = nextWIm;
+                    }
+                }
+            }
+        }
+
+        function ifft(real, imag) {
+            const N = real.length;
+            for (let i = 0; i < N; i++) {
+                imag[i] = -imag[i];
+            }
+            fft(real, imag);
+            for (let i = 0; i < N; i++) {
+                real[i] /= N;
+                imag[i] = -imag[i] / N;
+            }
+        }
+
+        // Helper: Hann window
+        function getHannWindow(N) {
+            const w = new Float32Array(N);
+            for (let i = 0; i < N; i++) {
+                w[i] = 0.5 * (1.0 - Math.cos((2.0 * Math.PI * i) / N));
+            }
+            return w;
+        }
+
+        // Helper: Zero boundary padding (matches librosa pad_mode='constant')
+        function getSampleZero(y, i) {
+            const L = y.length;
+            if (i < 0 || i >= L) {
+                return 0.0;
+            }
+            return y[i];
+        }
+
+        // 1D Median Filter for HPSS (matches librosa reflect padding boundary mode)
+        function medianFilter1D(arr, winSize) {
+            const L = arr.length;
+            const out = new Float32Array(L);
+            const half = Math.floor(winSize / 2);
+            const window = new Float32Array(winSize);
+            for (let i = 0; i < L; i++) {
+                let count = 0;
+                for (let w = -half; w <= half; w++) {
+                    let idx = i + w;
+                    if (idx < 0) {
+                        idx = -idx;
+                    } else if (idx >= L) {
+                        idx = 2 * L - 2 - idx;
+                    }
+                    window[count++] = arr[idx];
+                }
+                window.sort(); // fast sort for small array
+                out[i] = window[half];
+            }
+            return out;
+        }
+
+        // Mel conversion helpers (matching Librosa Slaney scaling exactly)
+        function hzToMel(hz) {
+            if (hz < 1000) return hz * 3 / 200;
+            return 15.0 + 27.0 * Math.log(hz / 1000.0) / Math.log(6.4);
+        }
+
+        function melToHz(mel) {
+            if (mel < 15.0) return mel * 200 / 3;
+            return 1000.0 * Math.exp((mel - 15.0) * Math.log(6.4) / 27.0);
+        }
+
+        // Generate Slaney normalized Mel Filterbank weights
+        function createMelFilterbank(sr, nFft, nMels) {
+            const fmin = 0;
+            const fmax = sr / 2;
+            const melMin = hzToMel(fmin);
+            const melMax = hzToMel(fmax);
+            const melPoints = new Float32Array(nMels + 2);
+            for (let i = 0; i < nMels + 2; i++) {
+                melPoints[i] = melMin + (melMax - melMin) * i / (nMels + 1);
+            }
+            const hzPoints = new Float32Array(nMels + 2);
+            for (let i = 0; i < nMels + 2; i++) {
+                hzPoints[i] = melToHz(melPoints[i]);
+            }
+            const binPoints = new Float32Array(nMels + 2);
+            for (let i = 0; i < nMels + 2; i++) {
+                binPoints[i] = hzPoints[i] * (nFft / 2) / (sr / 2);
+            }
+            
+            const numBins = nFft / 2 + 1;
+            const weights = [];
+            for (let m = 0; m < nMels; m++) {
+                const w = new Float32Array(numBins);
+                const fLeft = hzPoints[m];
+                const fCenter = hzPoints[m+1];
+                const fRight = hzPoints[m+2];
+                const bLeft = binPoints[m];
+                const bCenter = binPoints[m+1];
+                const bRight = binPoints[m+2];
+                
+                const scale = 2.0 / (fRight - fLeft);
+                for (let k = 0; k < numBins; k++) {
+                    if (k >= bLeft && k <= bRight) {
+                        if (k < bCenter) {
+                            w[k] = (k - bLeft) / (bCenter - bLeft) * scale;
+                        } else {
+                            w[k] = (bRight - k) / (bRight - bCenter) * scale;
+                        }
+                    } else {
+                        w[k] = 0;
+                    }
+                }
+                weights.push(w);
+            }
+            return weights;
+        }
+
+        // Power to dB with ref = 1.0 (matching Librosa's default)
+        // Values are clipped to topDb (80.0) below the peak value
+        function powerToDb(melSpec, topDb = 80.0) {
+            const nMels = melSpec.length;
+            const numFrames = melSpec[0].length;
+            let maxVal = 1e-10;
+            for (let m = 0; m < nMels; m++) {
+                for (let t = 0; t < numFrames; t++) {
+                    if (melSpec[m][t] > maxVal) maxVal = melSpec[m][t];
+                }
+            }
+            const dbSpec = [];
+            for (let m = 0; m < nMels; m++) {
+                dbSpec.push(new Float32Array(numFrames));
+            }
+            const maxDb = 10.0 * Math.log10(maxVal);
+            const floorDb = maxDb - topDb;
+            for (let m = 0; m < nMels; m++) {
+                for (let t = 0; t < numFrames; t++) {
+                    const val = melSpec[m][t];
+                    const db = 10.0 * Math.log10(Math.max(1e-10, val));
+                    dbSpec[m][t] = Math.max(db, floorDb);
+                }
+            }
+            return dbSpec;
+        }
+
+        // Core feature extraction runner
+        async function extractFeatures(y, sr) {
+            const N = 2048;
+            const H = 512;
+            const P = 1024;
+            const L = y.length;
+            const numFrames = Math.floor(L / H) + 1;
+            const win = getHannWindow(N);
+            const numBins = N / 2 + 1; // 1025
+
+            updateProgress(20, '音频波形加载完成，正在执行短时傅里叶变换 (STFT)...');
+            await new Promise(r => setTimeout(r, 50));
+
+            // 1. STFT Forward
+            const stftReal = [];
+            const stftImag = [];
+            const stftMag = [];
+            for (let t = 0; t < numFrames; t++) {
+                const real = new Float32Array(N);
+                const imag = new Float32Array(N);
+                const startIdx = t * H - P;
+                for (let i = 0; i < N; i++) {
+                    real[i] = getSampleZero(y, startIdx + i) * win[i];
+                }
+                fft(real, imag);
+                const rOut = new Float32Array(numBins);
+                const iOut = new Float32Array(numBins);
+                const mOut = new Float32Array(numBins);
+                for (let k = 0; k < numBins; k++) {
+                    rOut[k] = real[k];
+                    iOut[k] = imag[k];
+                    mOut[k] = Math.sqrt(real[k] * real[k] + imag[k] * imag[k]);
+                }
+                stftReal.push(rOut);
+                stftImag.push(iOut);
+                stftMag.push(mOut);
+            }
+
+            updateProgress(40, 'STFT 完成。正在运行声学 HPSS (谐波与敲击分离算法)...');
+            await new Promise(r => setTimeout(r, 50));
+
+            // 2. HPSS Separation
+            const H_filt = [];
+            const P_filt = [];
+            for (let k = 0; k < numBins; k++) {
+                H_filt.push(new Float32Array(numFrames));
+                P_filt.push(new Float32Array(numFrames));
+            }
+            // 2a. Filter along frequency (column by column)
+            for (let t = 0; t < numFrames; t++) {
+                const col = new Float32Array(numBins);
+                for (let k = 0; k < numBins; k++) col[k] = stftMag[t][k];
+                const filt = medianFilter1D(col, 31);
+                for (let k = 0; k < numBins; k++) P_filt[k][t] = filt[k];
+            }
+            // 2b. Filter along time (row by row)
+            for (let k = 0; k < numBins; k++) {
+                const row = new Float32Array(numFrames);
+                for (let t = 0; t < numFrames; t++) row[t] = stftMag[t][k];
+                const filt = medianFilter1D(row, 31);
+                for (let t = 0; t < numFrames; t++) H_filt[k][t] = filt[t];
+            }
+            // 2c. Soft masks and reconstruction
+            const eps = 1e-6;
+            const maskH = [];
+            const maskP = [];
+            for (let k = 0; k < numBins; k++) {
+                maskH.push(new Float32Array(numFrames));
+                maskP.push(new Float32Array(numFrames));
+                for (let t = 0; t < numFrames; t++) {
+                    const h2 = H_filt[k][t] * H_filt[k][t];
+                    const p2 = P_filt[k][t] * P_filt[k][t];
+                    const sum = h2 + p2 + eps;
+                    maskH[k][t] = h2 / sum;
+                    maskP[k][t] = p2 / sum;
+                }
+            }
+            const harmonicReal = [];
+            const harmonicImag = [];
+            const percussiveReal = [];
+            const percussiveImag = [];
+            for (let t = 0; t < numFrames; t++) {
+                harmonicReal.push(new Float32Array(numBins));
+                harmonicImag.push(new Float32Array(numBins));
+                percussiveReal.push(new Float32Array(numBins));
+                percussiveImag.push(new Float32Array(numBins));
+                for (let k = 0; k < numBins; k++) {
+                    harmonicReal[t][k] = stftReal[t][k] * maskH[k][t];
+                    harmonicImag[t][k] = stftImag[t][k] * maskH[k][t];
+                    percussiveReal[t][k] = stftReal[t][k] * maskP[k][t];
+                    percussiveImag[t][k] = stftImag[t][k] * maskP[k][t];
+                }
+            }
+
+            updateProgress(60, 'HPSS 分离完成。正在执行频域能量提取...');
+            await new Promise(r => setTimeout(r, 50));
+
+            // --- HPSS 纯频域 RMS (免 ISTFT，与 Python 对齐并大幅加速) ---
+            let sumSqP = 0, sumSqH = 0;
+            const totalCells = numFrames * numBins;
+            for (let t = 0; t < numFrames; t++) {
+                for (let k = 0; k < numBins; k++) {
+                    sumSqP += percussiveReal[t][k] * percussiveReal[t][k] + percussiveImag[t][k] * percussiveImag[t][k];
+                    sumSqH += harmonicReal[t][k] * harmonicReal[t][k] + harmonicImag[t][k] * harmonicImag[t][k];
+                }
+            }
+            const perPercEnergy = Math.sqrt(sumSqP / totalCells);
+            const harEnergy = Math.sqrt(sumSqH / totalCells);
+            const hpRatio = harEnergy / (perPercEnergy + 1e-6);
+
+            updateProgress(75, '频域特征提取完成。正在计算 20维梅尔倒谱系数 (MFCC)...');
+            await new Promise(r => setTimeout(r, 50));
+
+            // 3. Mel & MFCCs
+            const nMels = 128;
+            const melWeights = createMelFilterbank(sr, N, nMels);
+            const melSpec = [];
+            for (let m = 0; m < nMels; m++) {
+                melSpec.push(new Float32Array(numFrames));
+            }
+            for (let t = 0; t < numFrames; t++) {
+                for (let m = 0; m < nMels; m++) {
+                    let sum = 0;
+                    for (let k = 0; k < numBins; k++) {
+                        sum += melWeights[m][k] * (stftMag[t][k] * stftMag[t][k]);
+                    }
+                    melSpec[m][t] = sum;
+                }
+            }
+            const dbSpec = powerToDb(melSpec);
+
+            // Compute DCT matrix for MFCC (K = 128, n_mfcc = 20)
+            const nMfcc = 20;
+            const dctMatrix = [];
+            for (let i = 0; i < nMfcc; i++) {
+                const row = new Float32Array(nMels);
+                const alpha = (i === 0) ? Math.sqrt(1 / nMels) : Math.sqrt(2 / nMels);
+                for (let m = 0; m < nMels; m++) {
+                    row[m] = alpha * Math.cos(Math.PI / nMels * (m + 0.5) * i);
+                }
+                dctMatrix.push(row);
+            }
+            const mfccs = [];
+            for (let i = 0; i < nMfcc; i++) {
+                mfccs.push(new Float32Array(numFrames));
+            }
+            for (let t = 0; t < numFrames; t++) {
+                for (let i = 0; i < nMfcc; i++) {
+                    let val = 0;
+                    for (let m = 0; m < nMels; m++) {
+                        val += dctMatrix[i][m] * dbSpec[m][t];
+                    }
+                    mfccs[i][t] = val;
+                }
+            }
+
+            // Compute Onset strength
+            const onsetEnv = computeOnsetStrength(dbSpec);
+            let sumOnset = 0;
+            for (let t = 0; t < numFrames; t++) sumOnset += onsetEnv[t];
+            const onsetMean = sumOnset / numFrames;
+            let sumOnsetSq = 0;
+            for (let t = 0; t < numFrames; t++) {
+                const diff = onsetEnv[t] - onsetMean;
+                sumOnsetSq += diff * diff;
+            }
+            const onsetVar = sumOnsetSq / numFrames;
+
+            // Helper: Onset computation
+            function computeOnsetStrength(dbSpec) {
+                const diff = new Float32Array(numFrames - 1);
+                for (let t = 1; t < numFrames; t++) {
+                    let sumDiff = 0;
+                    for (let m = 0; m < nMels; m++) {
+                        const d = dbSpec[m][t] - dbSpec[m][t-1];
+                        if (d > 0) sumDiff += d;
+                    }
+                    diff[t-1] = sumDiff / nMels;
+                }
+                const onset = new Float32Array(numFrames);
+                for (let t = 0; t < numFrames; t++) {
+                    onset[t] = t < 3 ? 0.0 : diff[t-3];
+                }
+                return onset;
+            }
+
+            updateProgress(75, '统计谱心 (Spectral Centroid) 与谱滚降 (Spectral Rolloff)...');
+            await new Promise(r => setTimeout(r, 50));
+
+            // Spectral Centroid
+            const freqs = new Float32Array(numBins);
+            for (let k = 0; k < numBins; k++) freqs[k] = k * sr / N;
+            const centroids = new Float32Array(numFrames);
+            for (let t = 0; t < numFrames; t++) {
+                let num = 0;
+                let den = 0;
+                for (let k = 0; k < numBins; k++) {
+                    num += freqs[k] * stftMag[t][k];
+                    den += stftMag[t][k];
+                }
+                centroids[t] = num / (den + 1e-10);
+            }
+            let sumCentroid = 0;
+            for (let t = 0; t < numFrames; t++) sumCentroid += centroids[t];
+            const centroidMean = sumCentroid / numFrames;
+            let sumCentroidSq = 0;
+            for (let t = 0; t < numFrames; t++) {
+                const diff = centroids[t] - centroidMean;
+                sumCentroidSq += diff * diff;
+            }
+            const centroidStd = Math.sqrt(sumCentroidSq / numFrames);
+
+            // Spectral Rolloff
+            const rolloffs = new Float32Array(numFrames);
+            for (let t = 0; t < numFrames; t++) {
+                let total = 0;
+                for (let k = 0; k < numBins; k++) total += stftMag[t][k];
+                const threshold = 0.85 * total;
+                let cum = 0;
+                let K = 0;
+                for (let k = 0; k < numBins; k++) {
+                    cum += stftMag[t][k];
+                    if (cum >= threshold) {
+                        K = k;
+                        break;
+                    }
+                }
+                rolloffs[t] = K * sr / N;
+            }
+            let sumRolloff = 0;
+            for (let t = 0; t < numFrames; t++) sumRolloff += rolloffs[t];
+            const rolloffMean = sumRolloff / numFrames;
+            let sumRolloffSq = 0;
+            for (let t = 0; t < numFrames; t++) {
+                const diff = rolloffs[t] - rolloffMean;
+                sumRolloffSq += diff * diff;
+            }
+            const rolloffStd = Math.sqrt(sumRolloffSq / numFrames);
+
+            // ─────────────────────────────────────────
+            // ★ 新增特征计算 (50维 → 总 97 维)
+            // ─────────────────────────────────────────
+            updateProgress(82, '计算谱对比度 (Spectral Contrast 7 bands)...');
+            await new Promise(r => setTimeout(r, 50));
+
+            // === Spectral Contrast (14维: 7 bands × mean+std) ===
+            const nContrastBands = 6;
+            const contrastFmin = 200.0;
+            const neighborRatio = 0.02;
+            // Precompute band edges
+            const bandEdges = [0, contrastFmin];
+            for (let b = 1; b < nContrastBands; b++) {
+                bandEdges.push(contrastFmin * Math.pow(2, b));
+            }
+            // Clip last edge to Nyquist
+            bandEdges[nContrastBands] = Math.min(bandEdges[nContrastBands], sr / 2);
+            // Map band edges to FFT bin indices
+            const bandBins = [];
+            for (let b = 0; b < nContrastBands; b++) {
+                const lo = bandEdges[b];
+                const hi = bandEdges[b + 1];
+                const bins = [];
+                for (let k = 0; k < numBins; k++) {
+                    if (freqs[k] >= lo && freqs[k] < hi) bins.push(k);
+                }
+                bandBins.push(bins);
+            }
+            const contrastFrames = [];
+            for (let b = 0; b < nContrastBands; b++) {
+                contrastFrames.push(new Float32Array(numFrames));
+            }
+            for (let t = 0; t < numFrames; t++) {
+                for (let b = 0; b < nContrastBands; b++) {
+                    const bins = bandBins[b];
+                    if (bins.length === 0) {
+                        contrastFrames[b][t] = 0;
+                        continue;
+                    }
+                    const vals = [];
+                    for (let idx of bins) vals.push(stftMag[t][idx]);
+                    vals.sort((a, b) => b - a); // descending
+                    const kk = Math.max(1, Math.round(neighborRatio * vals.length));
+                    let peakSum = 0, valleySum = 0;
+                    for (let i = 0; i < kk; i++) peakSum += vals[i];
+                    for (let i = 0; i < kk; i++) valleySum += vals[vals.length - 1 - i];
+                    const peakMean = peakSum / kk;
+                    const valleyMean = valleySum / kk;
+                    contrastFrames[b][t] = peakMean - valleyMean;
+                }
+            }
+            const contrastStats = {};
+            for (let b = 0; b < nContrastBands; b++) {
+                let s = 0;
+                for (let t = 0; t < numFrames; t++) s += contrastFrames[b][t];
+                const mean = s / numFrames;
+                let sq = 0;
+                for (let t = 0; t < numFrames; t++) {
+                    const d = contrastFrames[b][t] - mean;
+                    sq += d * d;
+                }
+                contrastStats[`spectral_contrast_${b+1}_mean`] = mean;
+                contrastStats[`spectral_contrast_${b+1}_std`] = Math.sqrt(sq / numFrames);
+            }
+
+            updateProgress(87, '计算过零率 (Zero-Crossing Rate)...');
+            await new Promise(r => setTimeout(r, 50));
+
+            // === Zero-Crossing Rate (2维: mean+std) ===
+            const zcrFrameLen = N;
+            const zcrHop = H;
+            const zcrNumFrames = Math.floor((L - zcrFrameLen) / zcrHop) + 1;
+            const zcrVals = new Float32Array(zcrNumFrames);
+            for (let t = 0; t < zcrNumFrames; t++) {
+                const start = t * zcrHop;
+                let crossings = 0;
+                for (let i = 0; i < zcrFrameLen - 1; i++) {
+                    const idx = start + i;
+                    if (idx + 1 >= L) break;
+                    if ((y[idx] >= 0) !== (y[idx + 1] >= 0)) crossings++;
+                }
+                zcrVals[t] = crossings / zcrFrameLen;
+            }
+            let zcrSum = 0;
+            for (let t = 0; t < zcrNumFrames; t++) zcrSum += zcrVals[t];
+            const zcrMean = zcrSum / zcrNumFrames;
+            let zcrSq = 0;
+            for (let t = 0; t < zcrNumFrames; t++) {
+                const d = zcrVals[t] - zcrMean;
+                zcrSq += d * d;
+            }
+            const zcrStd = Math.sqrt(zcrSq / zcrNumFrames);
+
+            updateProgress(95, '61维特征提取完毕，正在通过 ONNX Runtime Web 进行边缘计算模型推理...');
+            await new Promise(r => setTimeout(r, 50));
+
+            // Pack features (61 dims)
+            // Base features (★ 特征权重调整)
+            const features = {
+                'percussive_energy': perPercEnergy * 0.3,  // 降权
+                'hp_ratio': hpRatio * 0.3,                  // 降权
+                'spectral_flux_mean': onsetMean,
+                'spectral_flux_var': onsetVar,
+                'centroid_mean': centroidMean,
+                'centroid_std': centroidStd,
+                'rolloff_std': rolloffStd
+            };
+            // MFCCs (40 dims)
+            for (let i = 0; i < nMfcc; i++) {
+                let sumVal = 0;
+                for (let t = 0; t < numFrames; t++) sumVal += mfccs[i][t];
+                const mean = sumVal / numFrames;
+                let sumSq = 0;
+                for (let t = 0; t < numFrames; t++) {
+                    const diff = mfccs[i][t] - mean;
+                    sumSq += diff * diff;
+                }
+                const std = Math.sqrt(sumSq / numFrames);
+                features[`mfcc_${i+1}_mean`] = mean;
+                features[`mfcc_${i+1}_std`] = std;
+            }
+            // Spectral Contrast (12 dims)
+            Object.assign(features, contrastStats);
+            // ZCR (2 dims)
+            features['zcr_mean'] = zcrMean;
+            features['zcr_std'] = zcrStd;
+
+            return features;
+        }
+
+        // Handle decoded audio file
+        async function handleAudioFile(file) {
+            if (!onnxSession) {
+                alert("请先载入 ONNX 鉴伪模型！你可以双击文件在本地架设一个简单 HTTP 服务器，或者点击状态栏右侧的“手动加载模型”按钮导入 suno_detector_model.onnx。");
+                return;
+            }
+
+            resetProgress(`正在解析: ${file.name}`);
+            const startTime = performance.now();
+            updateProgress(5, `读取文件二进制流...`);
+
+            try {
+                // Decode Audio
+                const arrayBuffer = await file.arrayBuffer();
+                const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                updateProgress(10, `正在使用 Web Audio API 解码音频格式...`);
+                const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+                // Get Mono Signal (average channels if stereo/multichannel to match Librosa load)
+                let signal;
+                if (audioBuffer.numberOfChannels > 1) {
+                    const ch0 = audioBuffer.getChannelData(0);
+                    const ch1 = audioBuffer.getChannelData(1);
+                    signal = new Float32Array(audioBuffer.length);
+                    for (let i = 0; i < audioBuffer.length; i++) {
+                        signal[i] = 0.5 * (ch0[i] + ch1[i]);
+                    }
+                } else {
+                    signal = audioBuffer.getChannelData(0);
+                }
+                const sr = audioBuffer.sampleRate;
+                const duration = audioBuffer.duration;
+
+                // ★ RMS 响度归一化 (LUFS 近似，目标 -23 dBFS) — 对齐 Python LUFS 归一化
+                {
+                    let sumSq = 0;
+                    for (let i = 0; i < signal.length; i++) sumSq += signal[i] * signal[i];
+                    const rms = Math.sqrt(sumSq / signal.length);
+                    if (rms > 1e-8) {
+                        const targetRms = 0.0901; // 10^(-20.9/20), matches -23 LUFS typical RMS level
+                        const gain = targetRms / rms;
+                        for (let i = 0; i < signal.length; i++) signal[i] *= gain;
+                    }
+                }
+
+                // Extract features
+                const features = await extractFeatures(signal, sr);
+
+                // ★ 提权关键特征 ×3 (与训练数据对齐)
+                const ampCols = [7, 16, 19, 20];
+                for (const i of ampCols) {
+                    features[`mfcc_${i}_mean`] *= 3.0;
+                    features[`mfcc_${i}_std`] *= 3.0;
+                }
+                for (const k of ['rolloff_std', 'centroid_std', 'zcr_std']) {
+                    features[k] *= 3.0;
+                }
+
+                // Compile input array (97 dims)
+                const featureOrder = [
+                    'percussive_energy', 'hp_ratio', 'spectral_flux_mean', 'spectral_flux_var',
+                    'centroid_mean', 'centroid_std',
+                    'mfcc_1_mean', 'mfcc_1_std', 'mfcc_2_mean', 'mfcc_2_std',
+                    'mfcc_3_mean', 'mfcc_3_std', 'mfcc_4_mean', 'mfcc_4_std',
+                    'mfcc_5_mean', 'mfcc_5_std', 'mfcc_6_mean', 'mfcc_6_std',
+                    'mfcc_7_mean', 'mfcc_7_std', 'mfcc_8_mean', 'mfcc_8_std',
+                    'mfcc_9_mean', 'mfcc_9_std', 'mfcc_10_mean', 'mfcc_10_std',
+                    'mfcc_11_mean', 'mfcc_11_std', 'mfcc_12_mean', 'mfcc_12_std',
+                    'mfcc_13_mean', 'mfcc_13_std', 'mfcc_14_mean', 'mfcc_14_std',
+                    'mfcc_15_mean', 'mfcc_15_std', 'mfcc_16_mean', 'mfcc_16_std',
+                    'mfcc_17_mean', 'mfcc_17_std', 'mfcc_18_mean', 'mfcc_18_std',
+                    'mfcc_19_mean', 'mfcc_19_std', 'mfcc_20_mean', 'mfcc_20_std',
+                    'rolloff_std',
+                    // ★ 新增 50 维
+                    'spectral_contrast_1_mean', 'spectral_contrast_1_std',
+                    'spectral_contrast_2_mean', 'spectral_contrast_2_std',
+                    'spectral_contrast_3_mean', 'spectral_contrast_3_std',
+                    'spectral_contrast_4_mean', 'spectral_contrast_4_std',
+                    'spectral_contrast_5_mean', 'spectral_contrast_5_std',
+                    'spectral_contrast_6_mean', 'spectral_contrast_6_std',
+                    'zcr_mean', 'zcr_std'
+                ];
+                
+                const NUM_FEATURES = 61;
+                const inputData = new Float32Array(NUM_FEATURES);
+                for (let i = 0; i < NUM_FEATURES; i++) {
+                    inputData[i] = features[featureOrder[i]];
+                }
+
+                // ONNX Inference
+                const tensorX = new ort.Tensor('float32', inputData, [1, NUM_FEATURES]);
+                const results = await onnxSession.run({ X: tensorX });
+                
+                // Get output
+                const label = results.label.data[0]; // 0: human, 1: ai
+                const probabilities = results.probabilities.data; // Float32Array [-prob_ai, prob_ai]
+                
+                const probAi = probabilities[1] * 100;
+                const probHuman = (1.0 - probabilities[1]) * 100;
+                const endTime = performance.now();
+                const totalCostSec = ((endTime - startTime) / 1000).toFixed(2);
+
+                updateProgress(100, `检测完成！总计算耗时: ${totalCostSec}秒。正在渲染分析报告...`);
+                await new Promise(r => setTimeout(r, 100));
+
+                // Display Results
+                showResults(file.name, sr, duration, totalCostSec, probAi, probHuman, label, features, featureOrder);
+
+            } catch (err) {
+                console.error(err);
+                progressTitle.textContent = "检测发生故障";
+                progressPercent.textContent = "Error";
+                const errDiv = document.createElement('div');
+                errDiv.style.color = '#ef4444';
+                errDiv.textContent = `[故障] 失败原因: ${err.message}`;
+                progressLog.appendChild(errDiv);
+            }
+        }
+
+        // Render Results Dashboard
+        function showResults(fileName, sr, duration, costTime, probAi, probHuman, label, features, featureOrder) {
+            progressCard.style.display = 'none';
+            resultCard.style.display = 'grid';
+            featuresCollapse.style.display = 'block';
+
+            // Stats
+            document.getElementById('spec-name').textContent = fileName.length > 25 ? fileName.substring(0,22)+'...' : fileName;
+            document.getElementById('spec-sr').textContent = `${sr} Hz`;
+            document.getElementById('spec-duration').textContent = `${duration.toFixed(1)} 秒`;
+            document.getElementById('spec-time').textContent = `${costTime} 秒`;
+
+            // Verdict badge and dial
+            const badge = document.getElementById('result-badge');
+            const icon = document.getElementById('verdict-icon');
+            const text = document.getElementById('verdict-text');
+            const reportText = document.getElementById('report-text');
+            const gauge = document.getElementById('gauge-progress');
+            
+            const circleLength = 502.6; // 2 * PI * 80
+
+            // Probabilities bars & labels
+            document.getElementById('prob-val-ai').textContent = `${probAi.toFixed(2)}%`;
+            document.getElementById('prob-val-human').textContent = `${probHuman.toFixed(2)}%`;
+            document.getElementById('prob-bar-ai').style.width = `${probAi}%`;
+            document.getElementById('prob-bar-human').style.width = `${probHuman}%`;
+
+            if (label === 1 || probAi > 50) {
+                // AI Verdict
+                badge.className = 'verdict-badge ai';
+                icon.textContent = '!';
+                text.textContent = 'AI DETECTED';
+                reportText.textContent = `经谱通量指纹匹配，该音轨检出高度符合 Suno V5.5 声学引擎的合成特征。人为匹配度过低，判定为 AI 生成。`;
+                
+                gauge.setAttribute('stroke', '#ef4444');
+                const offset = circleLength - (circleLength * probAi / 100);
+                gauge.style.strokeDashoffset = offset;
+                document.getElementById('result-percent').textContent = `${probAi.toFixed(0)}%`;
+                document.getElementById('result-label').textContent = 'AI MATCH';
+            } else {
+                // Human Verdict
+                badge.className = 'verdict-badge human';
+                icon.textContent = '\u2713';
+                text.textContent = 'HUMAN VERIFIED';
+                reportText.textContent = `未匹配到已知 Suno 合成指纹特征。谐波比率自然，声学动态与起音谱能量分布吻合人类物理发音规律，判定为真人录制。`;
+                
+                gauge.setAttribute('stroke', '#10b981');
+                const offset = circleLength - (circleLength * probHuman / 100);
+                gauge.style.strokeDashoffset = offset;
+                document.getElementById('result-percent').textContent = `${probHuman.toFixed(0)}%`;
+                document.getElementById('result-label').textContent = 'HUMAN MATCH';
+            }
+
+            // Fill features table
+            const tbody = document.getElementById('features-tbody');
+            tbody.innerHTML = '';
+            featureOrder.forEach(key => {
+                const tr = document.createElement('tr');
+                const nameTd = document.createElement('td');
+                nameTd.textContent = key;
+                const descTd = document.createElement('td');
+                descTd.textContent = FEATURE_DESCRIPTIONS[key] || '-';
+                const valTd = document.createElement('td');
+                valTd.textContent = features[key].toFixed(6);
+                valTd.style.fontWeight = 'bold';
+                valTd.style.color = 'var(--accent)';
+
+                tr.appendChild(nameTd);
+                tr.appendChild(descTd);
+                tr.appendChild(valTd);
+                tbody.appendChild(tr);
+            });
+        }
+    </script>
+</body>
+</html>
