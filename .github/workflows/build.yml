@@ -13,10 +13,16 @@ jobs:
         include:
           - os: windows-latest
             artifact: suno-checker-windows.zip
+            spec: predict.spec
+          - os: windows-latest
+            artifact: suno-checker-windows-portable.zip
+            spec: predict-portable.spec
           - os: macos-latest
             artifact: suno-checker-macos.dmg
+            spec: predict.spec
           - os: ubuntu-latest
             artifact: suno-checker-linux.tar.gz
+            spec: predict.spec
 
     runs-on: ${{ matrix.os }}
 
@@ -41,20 +47,24 @@ jobs:
       - name: Build (Windows)
         if: runner.os == 'Windows'
         run: |
-          pyinstaller predict.spec
-          Compress-Archive -Path dist/suno-checker/* -DestinationPath dist/suno-checker-windows.zip
+          pyinstaller ${{ matrix.spec }}
+          if ("${{ matrix.artifact }}" -like "*portable*") {
+            Compress-Archive -Path dist/suno-checker-portable.exe -DestinationPath dist/${{ matrix.artifact }}
+          } else {
+            Compress-Archive -Path dist/suno-checker/* -DestinationPath dist/${{ matrix.artifact }}
+          }
 
       - name: Build (macOS)
         if: runner.os == 'macOS'
         run: |
-          pyinstaller predict.spec
+          pyinstaller ${{ matrix.spec }}
           hdiutil create -volname "Suno Checker" -srcfolder "dist/Suno Checker.app" \
             -ov -format UDZO dist/suno-checker-macos.dmg
 
       - name: Build (Linux)
         if: runner.os == 'Linux'
         run: |
-          pyinstaller predict.spec
+          pyinstaller ${{ matrix.spec }}
           tar -czf dist/suno-checker-linux.tar.gz -C dist suno-checker
 
       - uses: actions/upload-artifact@v4
