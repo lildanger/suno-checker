@@ -17,7 +17,7 @@ jobs:
           - os: windows-latest
             artifact: suno-checker-windows-portable.zip
             spec: predict-portable.spec
-          - os: macos-12
+          - os: macos-latest
             artifact: suno-checker-macos.dmg
             spec: predict.spec
           - os: ubuntu-latest
@@ -57,7 +57,6 @@ jobs:
       - name: Build (macOS)
         if: runner.os == 'macOS'
         run: |
-          export MACOSX_DEPLOYMENT_TARGET=12.0
           pyinstaller ${{ matrix.spec }}
           hdiutil create -volname "Suno Checker" -srcfolder "dist/Suno Checker.app" \
             -ov -format UDZO dist/${{ matrix.artifact }}
@@ -98,8 +97,8 @@ jobs:
                 *   解压后使用。双击**秒开**，完全没有启动延迟，且杀毒软件误报概率极低（**推荐**）。
             *   **`suno-checker-windows-portable.zip` (便携版)**:
                 *   内含单个 `suno-checker-portable.exe`。双击直接运行，免去解压多文件的麻烦。由于单文件每次启动需后台解压，会有 3-5 秒左右的启动延时，属于正常现象。
-            *   **`suno-checker-macos.dmg` (macOS 全兼容版)**:
-                *   适用于 macOS 12 (Monterey)、macOS 13 (Ventura，包含 13.7)、macOS 14 (Sonoma) 及以上系统的统一安装包磁盘镜像。
+            *   **`suno-checker-macos.dmg` (macOS 版)**:
+                *   适用于 macOS 14 (Sonoma) 及以上系统的标准安装包磁盘镜像。
             *   **`suno-checker-linux.tar.gz` (Linux 版)**:
                 *   适用于 Linux 系统的绿色解压版。
 
