@@ -43,6 +43,7 @@ jobs:
         run: |
           pyinstaller --noconsole --onefile `
             --add-data "ai_music_detector.onnx;." `
+            --collect-all onnxruntime `
             --hidden-import fakeprint `
             --hidden-import scipy.ndimage._nd_image `
             --hidden-import scipy.ndimage._filters `
@@ -54,6 +55,7 @@ jobs:
         run: |
           pyinstaller --windowed --onefile \
             --add-data "ai_music_detector.onnx:." \
+            --collect-all onnxruntime \
             --hidden-import fakeprint \
             --hidden-import scipy.ndimage._nd_image \
             --hidden-import scipy.ndimage._filters \
@@ -67,6 +69,7 @@ jobs:
         run: |
           pyinstaller --noconsole --onefile \
             --add-data "ai_music_detector.onnx:." \
+            --collect-all onnxruntime \
             --hidden-import fakeprint \
             --hidden-import scipy.ndimage._nd_image \
             --hidden-import scipy.ndimage._filters \
