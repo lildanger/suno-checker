@@ -10,17 +10,13 @@
 
 - **桌面预测应用**：PyQt5 GUI，拖拽 mp3/wav/flac/m4a → 即时 AI/真人判定报告
 - **独立 EXE 分发**：PyInstaller 打包，单文件免安装，Windows 直接运行
-- **GPU 训练工具**：Tkinter GUI，CNN 特征提取 + 训练 + ONNX 导出（`1.py`）
+- **GPU 训练工具**：Tkinter GUI，CNN 特征提取 + 训练 + ONNX 导出（`trainer_gui.py`）
 - **双模型 fallback**：优先加载 lofcz fakeprint 模型，缺失时自动回退 ResNet-18 CNN
 - **批量特征提取**：支持多目录、懒加载裂变增强（15×）、多线程缓存预热
 
 ---
 
 ## 快速开始
-
-### 直接使用（无需安装）
-
-下载 `dist/predict.exe`，双击运行，拖拽音频文件即可。
 
 ### 从源码运行
 
@@ -33,7 +29,7 @@ python predict.py
 ### 训练自己的模型
 
 ```bash
-python 1.py
+python trainer_gui.py
 ```
 
 在 Tkinter GUI 中设置 AI/真人音频目录，点击训练即可导出 ONNX。
@@ -44,29 +40,15 @@ python 1.py
 
 ```
 ├── predict.py                    # PyQt5 GUI 预测工具 (v0.4, fakeprint 引擎)
-├── predict.spec                  # PyInstaller 打包配置
 ├── fakeprint.py                  # lofcz fakeprint 特征提取器 (纯 numpy/scipy)
 ├── ai_music_detector.onnx        # lofcz 预训练 ONNX 模型 (14.4KB, 逻辑回归)
 ├── suno_detector_model.onnx      # 旧版 ResNet-18 CNN ONNX 模型 (fallback)
-├── 1.py                          # Tkinter GUI 训练工具 (ResNet-18 CNN)
+├── trainer_gui.py                # Tkinter GUI 训练工具 (ResNet-18 CNN)
 ├── train_cnn.py                  # ResNet-18 训练核心逻辑
 ├── dataset.py                    # Log-Mel 频谱图数据集 + 懒加载裂变增强
-├── index.html                    # 纯前端 Web 检测页面 (实验性, ONNX Runtime Web)
-├── evaluate_onnx.py              # ONNX 模型评估脚本
-├── AI/                           # AI 生成音频样本 (训练用)
-├── 人类/                         # 真人音频样本 (训练用)
-├── lofcz_ai_music_detector/      # lofcz 上游仓库 (含完整训练/导出代码)
-│   └── src/
-│       ├── python/
-│       │   ├── extract_fakeprints.py   # GPU 加速 fakeprint 提取
-│       │   ├── train_model.py          # 逻辑回归训练
-│       │   ├── export_onnx.py          # ONNX 导出
-│       │   └── download_data.py        # 数据集下载 (FMA + SONICS)
-│       └── models/
-│           └── ai_music_detector.onnx  # 预训练模型
-├── dist/
-│   └── predict.exe               # 打包后的独立可执行文件 (~171MB)
-└── venv/                         # Python 虚拟环境
+├── index.html                    # 纯前端 Web 检测页面 (ONNX Runtime Web)
+├── .gitignore                    # Git 忽略规则
+└── .nojekyll                     # GitHub Pages 配置
 ```
 
 ---
@@ -177,8 +159,17 @@ ResNet-18 CNN 在 Log-Mel 频谱图上训练：
 
 ## 打包为独立 EXE
 
+> `predict.spec` 为本地构建产物，已加入 `.gitignore`。
+
 ```bash
-# 使用现有的 spec 文件
+# 首先生成 spec 文件
+pyi-makespec --noconsole --onefile \
+  --add-data "ai_music_detector.onnx;." \
+  --add-data "suno_detector_model.onnx;." \
+  --hidden-import fakeprint \
+  predict.py
+
+# 使用 spec 文件打包
 pyinstaller --clean predict.spec
 
 # 或手动指定
