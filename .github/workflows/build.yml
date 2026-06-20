@@ -32,10 +32,11 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libegl1 libxkbcommon0 libxcb-cursor0 \
-            libxcb-icccm4 libxcb-keysyms1 libxcb-shape0
+            libxcb-icccm4 libxcb-keysyms1 libxcb-shape0 \
+            libxcb-xkb1 libxkbcommon-x11-0 libxcb-xinerama0
 
       - name: Install Python deps
-        run: pip install pyinstaller librosa numpy scipy onnxruntime pyqt5
+        run: pip install pyinstaller librosa numpy scipy onnxruntime pyqt5 pyloudnorm
 
       - name: Build (Windows)
         if: runner.os == 'Windows'

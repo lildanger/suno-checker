@@ -469,7 +469,8 @@ class MainWindow(QMainWindow):
             }
         """)
 
-        font = QFont("Microsoft YaHei", 9)
+        font_family = "Microsoft YaHei" if sys.platform == "win32" else "sans-serif"
+        font = QFont(font_family, 9)
         QApplication.setFont(font)
 
         self.main_layout = QVBoxLayout()
