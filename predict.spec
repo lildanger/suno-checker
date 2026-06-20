@@ -16,13 +16,23 @@ if os.path.exists(ort_capi_path):
             if f.endswith(('.dll', '.so', '.dylib')):
                 ort_binaries.append((os.path.join(ort_capi_path, f), '.'))
 
+# 强制收集 Windows 下的 MSVC++ 核心运行时 DLLs，解决干净 Windows 环境下 DLL 初始化或找不到的崩溃问题
+vc_binaries = []
+if sys.platform == 'win32':
+    sys32 = os.path.join(os.environ.get('SystemRoot', 'C:\\Windows'), 'System32')
+    vc_dlls = ['msvcp140.dll', 'vcruntime140.dll', 'vcruntime140_1.dll']
+    for dll in vc_dlls:
+        dll_path = os.path.join(sys32, dll)
+        if os.path.exists(dll_path):
+            vc_binaries.append((dll_path, '.'))
+
 is_mac = sys.platform == 'darwin'
 app_name = 'Suno Checker' if is_mac else 'suno-checker'
 
 a = Analysis(
     ['predict.py'],
     pathex=[],
-    binaries=ort_binaries,
+    binaries=ort_binaries + vc_binaries,
     datas=[('ai_music_detector.onnx', '.')],
     hiddenimports=['fakeprint', 'scipy.ndimage._nd_image', 'scipy.ndimage._filters',
                    'scipy.special._ufuncs_cxx', 'soundfile', 'pyloudnorm'],

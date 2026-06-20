@@ -17,7 +17,14 @@ if getattr(sys, 'frozen', False):
                 pass
 
 # 优先导入 onnxruntime，避免与 PyQt5 产生的内存库锁定冲突
-import onnxruntime as ort
+try:
+    import onnxruntime as ort
+    ort_available = True
+    ort_error_msg = ""
+except Exception as e:
+    import traceback
+    ort_available = False
+    ort_error_msg = traceback.format_exc()
 
 # ==========================================
 # 修复 Windows venv 下找不到 Qt 插件的 Bug
@@ -543,8 +550,24 @@ class MainWindow(QMainWindow):
             }
         """)
         
-        welcome_text = "<span style='color: #45a29e;'>[系统初始化完成] lofcz/ai-music-detector (ISMIR 2025)</span><br>模型: fakeprint + 逻辑回归 | Accuracy: 99.88% | FPR: 0.31%<br>基于神经声码器反卷积伪影检测 — 非统计特征学习<br>━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━<br>"
-        self.log_text.append(welcome_text)
+        if ort_available:
+            welcome_text = "<span style='color: #45a29e;'>[系统初始化完成] lofcz/ai-music-detector (ISMIR 2025)</span><br>模型: fakeprint + 逻辑回归 | Accuracy: 99.88% | FPR: 0.31%<br>基于神经声码器反卷积伪影检测 — 非统计特征学习<br>━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━<br>"
+            self.log_text.append(welcome_text)
+        else:
+            self.status_dot.setText("● 引擎异常")
+            self.status_dot.setStyleSheet("color: #ff3333; font-size: 11px; font-weight: bold; font-family: 'Microsoft YaHei';")
+            error_text = f"""
+            <span style='color: #ff3333; font-weight: bold; font-size: 14px;'>[引擎初始化失败] ONNX 推理模块加载崩溃</span><br><br>
+            <b>崩溃详细原因：</b><br>
+            <span style='color: #ff8a80;'>{ort_error_msg.replace(chr(10), '<br>')}</span><br><br>
+            <b>通常解决方法：</b><br>
+            1. 您的电脑缺少微软 C++ 运行库，请下载安装：<br>
+               <a href="https://aka.ms/vs/17/release/vc_redist.x64.exe" style="color: #00e5ff; font-weight: bold;">点击此处下载微软官方 VC++ 2015-2022 运行库 (x64)</a><br>
+               (安装后请重启电脑再运行此程序)<br><br>
+            2. 如果您的 CPU 极其老旧（不支持 AVX/AVX2 指令集，如早期的奔腾、赛扬等），将无法运行此版本的 ONNX 引擎。<br>
+            ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━<br>
+            """
+            self.log_text.append(error_text)
 
         # 组装布局
         self.main_layout.addWidget(self.header)
@@ -576,6 +599,10 @@ class MainWindow(QMainWindow):
         self.start_analysis(file_path)
 
     def start_analysis(self, file_path):
+        if not ort_available:
+            self.log_text.append("\n❌ <span style='color: #ff3333; font-weight: bold;'>[错误] 引擎未就绪，无法进行音频分析。请先根据上述说明安装微软运行库。</span>")
+            return
+
         if hasattr(self, 'worker') and self.worker.isRunning():
             self.log_text.append("\n⚠️ <span style='color: #ff3333;'>[忙碌] 核心正在处理上一任务，请稍后再试！</span>")
             return

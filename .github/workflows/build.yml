@@ -36,7 +36,7 @@ jobs:
             libxcb-xkb1 libxkbcommon-x11-0 libxcb-xinerama0
 
       - name: Install Python deps
-        run: pip install pyinstaller librosa numpy scipy onnxruntime pyqt5 pyloudnorm
+        run: pip install pyinstaller librosa "numpy<2" scipy onnxruntime==1.16.3 pyqt5 pyloudnorm
 
       - name: Build (Windows)
         if: runner.os == 'Windows'
