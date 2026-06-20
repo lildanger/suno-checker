@@ -123,25 +123,6 @@ pyinstaller --noconsole --onefile \
   predict.py
 ```
 
-### 反编译保护
-
-PyInstaller 打包的 exe 可通过 `pyinstxtractor` + `pycdc` 提取反编译。如需加固：
-
-| 方案 | 保护强度 | 说明 |
-|------|---------|------|
-| **Nuitka** | 高 | Python → C → 机器码，无可提取的 .pyc |
-| **Cython + PyInstaller** | 高 | 核心逻辑编译为 .pyd (C 扩展) |
-| **PyArmor** | 中 | 字节码混淆加密，运行时解密 |
-
-```bash
-pip install nuitka
-python -m nuitka --standalone --onefile \
-  --windows-console-mode=disable \
-  --enable-plugin=pyqt5 \
-  --include-data-file=ai_music_detector.onnx=. \
-  predict.py
-```
-
 ---
 
 ## 已知局限
