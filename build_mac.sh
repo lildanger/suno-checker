@@ -11,8 +11,9 @@ echo -e "\033[1;36m==================================================\033[0m"
 echo -e "\033[1;36m    Suno Checker 本地 macOS 一键打包程序启动...\033[0m"
 echo -e "\033[1;36m==================================================\033[0m"
 
-# 1. 优先寻找兼容的 Python 版本 (推荐 Python 3.11 或 3.12)
-# 由于 Python 3.13 过于新，PyQt5 和 ONNX Runtime 官方尚未对其提供预编译支持
+# 1. 寻找兼容的 Python 3.11 版本
+# 必须使用 Python 3.11，因为它是 llvmlite/numba 在 Intel Mac 下提供免编译二进制包的黄金版本。
+# 高于 3.11 的版本（如 3.12/3.13）在 Intel Mac 上通常缺失预编译二进制包，会触发从源码编译 llvmlite 导致崩溃。
 PYTHON_BIN=""
 DEFAULT_PY_VER=""
 
@@ -20,12 +21,11 @@ if command -v python3 &> /dev/null; then
     DEFAULT_PY_VER=$(python3 -c 'import sys; print(".".join(map(str, sys.version_info[:2])))')
 fi
 
-for cmd in python3.11 python3.12 python3; do
+# 仅搜寻 python3.11 或是版本符合 3.11 的 python3
+for cmd in python3.11 python3; do
     if command -v $cmd &> /dev/null; then
         VER=$($cmd -c 'import sys; print(".".join(map(str, sys.version_info[:2])))')
-        MAJOR=$(echo $VER | cut -d. -f1)
-        MINOR=$(echo $VER | cut -d. -f2)
-        if [ "$MAJOR" -eq 3 ] && [ "$MINOR" -ge 8 ] && [ "$MINOR" -le 12 ]; then
+        if [ "$VER" = "3.11" ]; then
             PYTHON_BIN=$cmd
             PYTHON_VER=$VER
             break
@@ -34,15 +34,12 @@ for cmd in python3.11 python3.12 python3; do
 done
 
 if [ -z "$PYTHON_BIN" ]; then
-    echo -e "\033[1;31m[错误] 未能在系统里找到兼容的 Python 环境！\033[0m"
-    echo -e "您当前默认的 python3 版本是 \033[1;33m$DEFAULT_PY_VER\033[0m。"
-    echo -e "由于 Python 3.13+ 太新，PyQt5 与 onnxruntime 官方尚未提供对应二进制支持包，导致依赖无法安装。"
-    echo -e "\033[1;32m\n👉 请尝试通过以下任一方式安装兼容版本：\033[0m"
-    echo -e "  * 方式 1 (Homebrew 极速安装):"
+    echo -e "\033[1;31m[错误] 未能在系统里找到兼容的 Python 3.11 环境！\033[0m"
+    echo -e "您当前的默认 python3 版本为 \033[1;33m$DEFAULT_PY_VER\033[0m。"
+    echo -e "由于 Intel 芯片 Mac 架构的特殊性，Python 3.12 及以上版本缺少 \033[1;36mllvmlite\033[0m 的二进制预编译包，导致本地编译崩溃。"
+    echo -e "\033[1;32m\n👉 请运行以下命令安装 Python 3.11 (这不会影响你原有的 Python 3.12/3.13)：\033[0m"
     echo -e "    \033[1;36mbrew install python@3.11\033[0m"
-    echo -e "  * 方式 2 (Conda 虚拟环境):"
-    echo -e "    \033[1;36mconda create -n suno python=3.11 -y && conda activate suno\033[0m"
-    echo -e "\n安装完成后，重新在此处运行此脚本即可！"
+    echo -e "\n安装完成后，重新在此处运行此脚本即可一秒秒装并打包成功！"
     exit 1
 fi
 
@@ -60,6 +57,8 @@ source venv/bin/activate
 # 3. 安装依赖库
 echo -e "\033[1;33m[步骤 2/3] 正在沙盒中安装编译依赖库...\033[0m"
 pip install --upgrade pip
+# 强制安装含 Intel macOS 预编译 wheel 的版本，避免从源码编译 llvmlite 导致崩溃
+pip install "llvmlite==0.41.1" "numba==0.58.1"
 pip install pyinstaller librosa "numpy<2" scipy "onnxruntime>=1.16.3" pyqt5 pyloudnorm pillow
 
 # 4. 设置编译部署兼容目标（向后兼容至 macOS 12.0，全面覆盖 13.x 14.x 15.x 等系统）
