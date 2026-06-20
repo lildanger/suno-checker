@@ -5,14 +5,16 @@ import warnings
 # 强制添加脚本所在绝对目录至 sys.path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-# 解决 PyInstaller 单文件打包后，Windows 环境下加载外部系统不兼容 DLL 导致初始化失败的问题
+# 解决 PyInstaller 单文件打包后 DLL 搜索路径问题
 if getattr(sys, 'frozen', False):
-    try:
-        # 将 PyInstaller 的临时解压目录以及 onnxruntime/capi 添加至最高优先级 DLL 搜索路径
-        os.add_dll_directory(sys._MEIPASS)
-        os.add_dll_directory(os.path.join(sys._MEIPASS, 'onnxruntime', 'capi'))
-    except AttributeError:
-        pass
+    _meipass = sys._MEIPASS
+    # 递归添加所有含 DLL/PYD 的目录，确保 onnxruntime 等原生扩展能找到依赖
+    for _root, _dirs, _files in os.walk(_meipass):
+        if any(f.endswith(('.dll', '.pyd', '.so')) for f in _files):
+            try:
+                os.add_dll_directory(_root)
+            except (AttributeError, OSError):
+                pass
 
 # 优先导入 onnxruntime，避免与 PyQt5 产生的内存库锁定冲突
 import onnxruntime as ort
