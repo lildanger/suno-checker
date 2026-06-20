@@ -47,9 +47,19 @@ jobs:
       - name: Build (macOS)
         if: runner.os == 'macOS'
         run: |
-          pyinstaller --windowed --osx-bundle-identifier com.suno.checker predict.spec
-          mv "dist/Suno Checker.app" "dist/suno-checker.app" 2>/dev/null || true
-          hdiutil create -volname "Suno Checker" -srcfolder "dist/suno-checker.app" \
+          pyinstaller --windowed --onedir \
+            --add-data "ai_music_detector.onnx:." \
+            --collect-all onnxruntime \
+            --hidden-import fakeprint \
+            --hidden-import scipy.ndimage._nd_image \
+            --hidden-import scipy.ndimage._filters \
+            --hidden-import scipy.special._ufuncs_cxx \
+            --hidden-import soundfile \
+            --hidden-import pyloudnorm \
+            --name "Suno Checker" \
+            --osx-bundle-identifier com.suno.checker \
+            predict.py
+          hdiutil create -volname "Suno Checker" -srcfolder "dist/Suno Checker.app" \
             -ov -format UDZO dist/suno-checker-macos.dmg
 
       - name: Build (Linux)
