@@ -1,0 +1,107 @@
+name: Build & Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            artifact: predict.exe
+            artifact_name: predict-windows
+          - os: macos-latest
+            artifact: predict
+            artifact_name: predict-macos
+          - os: ubuntu-latest
+            artifact: predict
+            artifact_name: predict-linux
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install system deps (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1-mesa libxkbcommon0 libxcb-cursor0 \
+            libxcb-icccm4 libxcb-keysyms1 libxcb-shape0
+
+      - name: Install Python deps
+        run: pip install pyinstaller librosa numpy scipy onnxruntime pyqt5
+
+      - name: Build (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          pyinstaller --noconsole --onefile `
+            --add-data "ai_music_detector.onnx;." `
+            --hidden-import fakeprint `
+            --hidden-import scipy.ndimage._nd_image `
+            --hidden-import scipy.ndimage._filters `
+            --name predict `
+            predict.py
+
+      - name: Build (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          pyinstaller --noconsole --onefile \
+            --add-data "ai_music_detector.onnx:." \
+            --hidden-import fakeprint \
+            --hidden-import scipy.ndimage._nd_image \
+            --hidden-import scipy.ndimage._filters \
+            --name predict \
+            predict.py
+
+      - name: Build (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          pyinstaller --noconsole --onefile \
+            --add-data "ai_music_detector.onnx:." \
+            --hidden-import fakeprint \
+            --hidden-import scipy.ndimage._nd_image \
+            --hidden-import scipy.ndimage._filters \
+            --name predict \
+            predict.py
+
+      - name: Rename artifact (Windows)
+        if: runner.os == 'Windows'
+        run: mv dist/predict.exe dist/predict-windows.exe
+
+      - name: Rename artifact (macOS)
+        if: runner.os == 'macOS'
+        run: mv dist/predict dist/predict-macos
+
+      - name: Rename artifact (Linux)
+        if: runner.os == 'Linux'
+        run: mv dist/predict dist/predict-linux
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: dist/${{ matrix.artifact_name }}*
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Upload Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*
+          generate_release_notes: true
