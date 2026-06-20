@@ -41,43 +41,21 @@ jobs:
       - name: Build (Windows)
         if: runner.os == 'Windows'
         run: |
-          pyinstaller --noconsole --onedir `
-            --add-data "ai_music_detector.onnx;." `
-            --collect-all onnxruntime `
-            --hidden-import fakeprint `
-            --hidden-import scipy.ndimage._nd_image `
-            --hidden-import scipy.ndimage._filters `
-            --name suno-checker `
-            predict.py
+          pyinstaller predict.spec
           Compress-Archive -Path dist/suno-checker/* -DestinationPath dist/suno-checker-windows.zip
 
       - name: Build (macOS)
         if: runner.os == 'macOS'
         run: |
-          pyinstaller --windowed --onedir \
-            --add-data "ai_music_detector.onnx:." \
-            --collect-all onnxruntime \
-            --hidden-import fakeprint \
-            --hidden-import scipy.ndimage._nd_image \
-            --hidden-import scipy.ndimage._filters \
-            --name "Suno Checker" \
-            --osx-bundle-identifier com.suno.checker \
-            predict.py
-          # Create DMG
-          hdiutil create -volname "Suno Checker" -srcfolder "dist/Suno Checker.app" \
+          pyinstaller --windowed --osx-bundle-identifier com.suno.checker predict.spec
+          mv "dist/Suno Checker.app" "dist/suno-checker.app" 2>/dev/null || true
+          hdiutil create -volname "Suno Checker" -srcfolder "dist/suno-checker.app" \
             -ov -format UDZO dist/suno-checker-macos.dmg
 
       - name: Build (Linux)
         if: runner.os == 'Linux'
         run: |
-          pyinstaller --noconsole --onedir \
-            --add-data "ai_music_detector.onnx:." \
-            --collect-all onnxruntime \
-            --hidden-import fakeprint \
-            --hidden-import scipy.ndimage._nd_image \
-            --hidden-import scipy.ndimage._filters \
-            --name suno-checker \
-            predict.py
+          pyinstaller predict.spec
           tar -czf dist/suno-checker-linux.tar.gz -C dist suno-checker
 
       - uses: actions/upload-artifact@v4
