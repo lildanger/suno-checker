@@ -1,0 +1,21 @@
+# Suno Checker v0.4.1 更新说明
+
+本次更新重点修复了 Windows 平台下 ONNX Runtime DLL 缺失及加载崩溃问题，并提供了全新的多端编译分发体系。
+
+### 🎁 编译文件下载指南
+
+*   **`suno-checker-windows.zip` (标准版)**:
+    *   解压后使用。双击**秒开**，完全没有启动延迟，且杀毒软件误报概率极低（**推荐**）。
+*   **`suno-checker-windows-portable.zip` (便携版)**:
+    *   内含单个 `suno-checker-portable.exe`。双击直接运行，免去解压多文件的麻烦。由于单文件每次启动需后台解压，会有 3-5 秒左右的启动延时，属于正常现象。
+*   **`suno-checker-macos.dmg` (macOS 版)**:
+    *   适用于 Mac 系统的标准安装包磁盘镜像。
+*   **`suno-checker-linux.tar.gz` (Linux 版)**:
+    *   适用于 Linux 系统的绿色解压版。
+
+### 🛠️ v0.4.1 更新日志
+
+1.  **修复 DLL 加载崩溃**：打包中已自动包含微软核心运行库（如 `vcruntime140_1.dll`），完美解决部分 Windows 环境下导入 onnxruntime 时的 `初始化例程失败` 问题。
+2.  **增加引擎容灾保护**：若导入引擎发生异常（如 CPU 不支持 AVX/AVX2），软件绝不秒退，而是开启 GUI 并呈显醒目的红色排查指引与微软运行库直链下载。
+3.  **应用专属 App 图标**：设计并应用了全新 AI 音频检测精美图标（支持窗口左上角、Windows EXE 文件以及 macOS App 专属图标）。
+4.  **包体积深度精简**：优化了编译剔除规则，剔除了冗余大库依赖，使各平台最终发布体积大幅精简。
