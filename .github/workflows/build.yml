@@ -41,36 +41,13 @@ jobs:
       - name: Build (Windows)
         if: runner.os == 'Windows'
         run: |
-          pyinstaller --noconsole --onedir `
-            --add-data "ai_music_detector.onnx;." `
-            --hidden-import fakeprint `
-            --hidden-import scipy.ndimage._nd_image `
-            --hidden-import scipy.ndimage._filters `
-            --hidden-import scipy.special._ufuncs_cxx `
-            --hidden-import soundfile `
-            --hidden-import pyloudnorm `
-            --name suno-checker `
-            predict.py
-          # 暴力复制 onnxruntime 全部原生二进制到输出根目录
-          $ort_root = (python -c "import onnxruntime, os; print(os.path.dirname(onnxruntime.__file__))")
-          Get-ChildItem -Path $ort_root -Recurse -Include *.dll,*.pyd | Copy-Item -Destination dist/suno-checker/ -Force
+          pyinstaller predict.spec
           Compress-Archive -Path dist/suno-checker/* -DestinationPath dist/suno-checker-windows.zip
 
       - name: Build (macOS)
         if: runner.os == 'macOS'
         run: |
-          pyinstaller --windowed --onedir \
-            --add-data "ai_music_detector.onnx:." \
-            --collect-all onnxruntime \
-            --hidden-import fakeprint \
-            --hidden-import scipy.ndimage._nd_image \
-            --hidden-import scipy.ndimage._filters \
-            --hidden-import scipy.special._ufuncs_cxx \
-            --hidden-import soundfile \
-            --hidden-import pyloudnorm \
-            --name "Suno Checker" \
-            --osx-bundle-identifier com.suno.checker \
-            predict.py
+          pyinstaller predict.spec
           hdiutil create -volname "Suno Checker" -srcfolder "dist/Suno Checker.app" \
             -ov -format UDZO dist/suno-checker-macos.dmg
 

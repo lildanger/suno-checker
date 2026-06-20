@@ -1,5 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
 import os
+import sys
 import onnxruntime
 
 # 收集 onnxruntime/capi 下的所有原生二进制文件 (dll/pyd/so/dylib)
@@ -9,7 +10,14 @@ bin_exts = ('.dll', '.pyd', '.so', '.dylib')
 if os.path.exists(ort_capi_path):
     for f in os.listdir(ort_capi_path):
         if f.endswith(bin_exts):
-            ort_binaries.append((os.path.join(ort_capi_path, f), '.'))
+            # 1. 复制到 onnxruntime/capi 目录下，保持 Python 模块的包结构
+            ort_binaries.append((os.path.join(ort_capi_path, f), 'onnxruntime/capi'))
+            # 2. 如果是 DLL 依赖库，同时也复制到根目录下，方便系统加载器寻找
+            if f.endswith(('.dll', '.so', '.dylib')):
+                ort_binaries.append((os.path.join(ort_capi_path, f), '.'))
+
+is_mac = sys.platform == 'darwin'
+app_name = 'Suno Checker' if is_mac else 'suno-checker'
 
 a = Analysis(
     ['predict.py'],
@@ -36,7 +44,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name='suno-checker',
+    name=app_name,
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -56,5 +64,14 @@ coll = COLLECT(
     strip=False,
     upx=False,
     upx_exclude=[],
-    name='suno-checker',
+    name=app_name,
 )
+
+if is_mac:
+    app = BUNDLE(
+        coll,
+        name='Suno Checker.app',
+        icon=None,
+        bundle_identifier='com.suno.checker',
+    )
+
