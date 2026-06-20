@@ -1,4 +1,4 @@
-# Suno AI 音乐检测系统 (Suno AI Music Detector)
+# Suno AI 音乐检测系统 (Suno AI Music Checker)
 
 基于 **ISMIR 2025 fakeprint 频谱伪影分析** 的 AI 生成音乐检测系统。可识别 Suno ≤v5、Udio ≤v1.5 等神经声码器生成的音频。提供 PyQt5 桌面 GUI 和 ONNX 模型推理。
 
