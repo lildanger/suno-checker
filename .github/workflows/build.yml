@@ -51,13 +51,15 @@ jobs:
       - name: Build (macOS)
         if: runner.os == 'macOS'
         run: |
-          pyinstaller --noconsole --onefile \
+          pyinstaller --windowed --onefile \
             --add-data "ai_music_detector.onnx:." \
             --hidden-import fakeprint \
             --hidden-import scipy.ndimage._nd_image \
             --hidden-import scipy.ndimage._filters \
-            --name suno-checker \
+            --name "Suno Checker" \
+            --osx-bundle-identifier com.suno.checker \
             predict.py
+          cd dist && zip -r suno-checker-macos.zip "Suno Checker.app"
 
       - name: Build (Linux)
         if: runner.os == 'Linux'
@@ -73,10 +75,6 @@ jobs:
       - name: Rename artifact (Windows)
         if: runner.os == 'Windows'
         run: mv dist/suno-checker.exe dist/${{ matrix.artifact_name }}.exe
-
-      - name: Rename artifact (macOS)
-        if: runner.os == 'macOS'
-        run: mv dist/suno-checker dist/${{ matrix.artifact_name }}
 
       - name: Rename artifact (Linux)
         if: runner.os == 'Linux'
