@@ -1,0 +1,13 @@
+venv/
+__pycache__/
+*.pyc
+AI/
+人类/
+*.csv
+*.pkl
+*.json
+!package.json
+.DS_Store
+Thumbs.db
+*.log
+*.spec

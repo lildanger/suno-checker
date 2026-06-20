@@ -3,12 +3,22 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Suno Checker</title>
-    <meta name="description" content="Suno Checker - 基于浏览器的 AI 音乐检测工具，100% 本地运算，保护隐私。">
+    <title>Suno 鉴伪系统 - 纯前端边缘计算版</title>
+    <meta name="description" content="基于 WebAssembly 与 ONNX Runtime Web 的纯前端边缘计算 Suno 音频检测系统，100% 本地运算，保护隐私。">
     <!-- Fonts: Geist (sans) + JetBrains Mono (mono) -->
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script>
+        // 早期状态: 在外部 CDN 加载期间就显示进度
+        document.addEventListener('DOMContentLoaded', function() {
+            var st = document.getElementById('status-text');
+            var sd = document.getElementById('status-dot');
+            if (st) st.textContent = '正在加载 ONNX Runtime WASM 引擎（首次约需下载 5MB）...';
+            if (sd) sd.style.backgroundColor = '#f59e0b';
+        });
+    </script>
     <!-- ONNX Runtime Web -->
     <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/meyda/dist/web/meyda.min.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap');
 
@@ -512,7 +522,7 @@
 <body>
     <div class="container">
         <header>
-            <h1>Suno Checker 1.0</h1>
+            <h1>Suno 鉴伪系统</h1>
             <div class="subtitle">edge compute // 100% local // onnx-wasm</div>
         </header>
 
@@ -620,7 +630,7 @@
         <!-- Features Table -->
         <div class="features-collapse" id="features-collapse">
             <div class="collapse-header" id="collapse-header">
-                <span>声学特征矩阵 (61 dims)</span>
+                <span>声学特征矩阵 (97 dims)</span>
                 <svg class="arrow-icon" viewBox="0 0 24 24">
                     <path d="M6 9l6 6 6-6"></path>
                 </svg>
@@ -643,7 +653,7 @@
     </div>
 
     <footer>
-        <p>DanJuan Suno Checker 1.0 &middot; ONNX Runtime Web &middot; Wasm</p>
+        <p>DanJuan Suno Detector &middot; ONNX Runtime Web &middot; Wasm</p>
     </footer>
 
     <script>
@@ -699,14 +709,45 @@
 
         // Check and load model on startup
         window.addEventListener('load', async () => {
+            // 诊断: 检查核心库是否加载成功
+            console.log('[启动诊断] ort 加载状态:', typeof ort !== 'undefined' ? 'OK' : 'FAILED');
+            console.log('[启动诊断] Meyda 加载状态:', typeof Meyda !== 'undefined' ? 'OK' : 'FAILED');
+            console.log('[启动诊断] 当前协议:', window.location.protocol);
+            
+            if (typeof ort === 'undefined') {
+                updateStatus('failed', 'ONNX Runtime Web 库加载失败！请检查网络，或使用本地 HTTP 服务器打开此页面。');
+                return;
+            }
+            if (typeof Meyda === 'undefined') {
+                updateStatus('failed', 'Meyda 音频分析库加载失败！请检查网络连接。');
+                return;
+            }
+            
+            // 如果是 file:// 协议，给出明确提示
+            if (window.location.protocol === 'file:') {
+                console.warn('[启动诊断] 检测到 file:// 协议，可能存在 CORS 限制');
+            }
+            
             try {
-                // Try automatic loading
-                updateStatus('waiting', '正在载入本地 ONNX 鉴伪模型...');
+                updateStatus('waiting', '正在初始化 ONNX Runtime WASM 引擎（首次加载需下载 ~5MB，约 10-30 秒）...');
+                // 超时机制: 30秒后如果 ORT 还没就绪，提示用户
+                const loadTimer = setTimeout(() => {
+                    if (!onnxSession) {
+                        updateStatus('failed', '模型加载超时（可能是 WASM 下载慢）。请手动点击右侧"加载模型"按钮。');
+                        btnLoadModel.style.display = 'inline-block';
+                    }
+                }, 30000);
+
                 onnxSession = await ort.InferenceSession.create('./suno_detector_model.onnx');
+                clearTimeout(loadTimer);
                 updateStatus('success', 'ONNX 鉴伪模型已就绪 (100% 边缘计算)');
+                console.log('[ONNX] 模型输入名:', onnxSession.inputNames);
+                console.log('[ONNX] 模型输出名:', onnxSession.outputNames);
             } catch (e) {
-                console.warn("Auto model load failed (CORS or missing file): ", e);
-                updateStatus('failed', '无法自动载入模型 (可能是双击文件打开导致的跨域限制)。');
+                clearTimeout(loadTimer);
+                console.warn("Auto model load failed: ", e);
+                console.warn("Error type:", typeof e, "message:", e?.message, "name:", e?.name);
+                updateStatus('failed', '无法自动载入模型。请在状态栏右侧点击"加载模型"手动导入，或使用本地 HTTP 服务器打开此页面。');
                 btnLoadModel.style.display = 'inline-block';
             }
         });
@@ -790,560 +831,508 @@
         }
 
         // ==========================================
-        // Core Audio Processing (WASM / DSP)
+        // Core Audio Processing (Meyda-based DSP, 97-dim aligned with 1.py)
         // ==========================================
 
-        // Cooley-Tukey Radix-2 FFT/IFFT
-        function bitReverse(real, imag) {
-            const N = real.length;
-            let j = 0;
-            for (let i = 0; i < N; i++) {
-                if (i < j) {
-                    let tempRe = real[i]; real[i] = real[j]; real[j] = tempRe;
-                    let tempIm = imag[i]; imag[i] = imag[j]; imag[j] = tempIm;
-                }
-                let m = N >> 1;
-                while (m >= 1 && j >= m) {
-                    j -= m;
-                    m >>= 1;
-                }
-                j += m;
-            }
+        function mean(arr) {
+            let s = 0;
+            for (let i = 0; i < arr.length; i++) s += arr[i];
+            return s / arr.length;
         }
 
-        function fft(real, imag) {
-            const N = real.length;
-            bitReverse(real, imag);
-            for (let len = 2; len <= N; len <<= 1) {
-                const angle = -2 * Math.PI / len;
-                const wlenRe = Math.cos(angle);
-                const wlenIm = Math.sin(angle);
-                for (let i = 0; i < N; i += len) {
-                    let wRe = 1;
-                    let wIm = 0;
-                    const halfLen = len >> 1;
-                    for (let j = 0; j < halfLen; j++) {
-                        const u = i + j;
-                        const v = u + halfLen;
-                        const tRe = real[v] * wRe - imag[v] * wIm;
-                        const tIm = real[v] * wIm + imag[v] * wRe;
-                        real[v] = real[u] - tRe;
-                        imag[v] = imag[u] - tIm;
-                        real[u] += tRe;
-                        imag[u] += tIm;
-                        
-                        const nextWRe = wRe * wlenRe - wIm * wlenIm;
-                        const nextWIm = wRe * wlenIm + wIm * wlenRe;
-                        wRe = nextWRe;
-                        wIm = nextWIm;
-                    }
-                }
+        function std(arr) {
+            const m = mean(arr);
+            let s = 0;
+            for (let i = 0; i < arr.length; i++) {
+                const d = arr[i] - m;
+                s += d * d;
             }
+            return Math.sqrt(s / arr.length);
         }
 
-        function ifft(real, imag) {
-            const N = real.length;
-            for (let i = 0; i < N; i++) {
-                imag[i] = -imag[i];
+        function var_(arr) {
+            const m = mean(arr);
+            let s = 0;
+            for (let i = 0; i < arr.length; i++) {
+                const d = arr[i] - m;
+                s += d * d;
             }
-            fft(real, imag);
-            for (let i = 0; i < N; i++) {
-                real[i] /= N;
-                imag[i] = -imag[i] / N;
-            }
+            return s / arr.length;
         }
 
-        // Helper: Hann window
-        function getHannWindow(N) {
-            const w = new Float32Array(N);
-            for (let i = 0; i < N; i++) {
-                w[i] = 0.5 * (1.0 - Math.cos((2.0 * Math.PI * i) / N));
-            }
-            return w;
-        }
-
-        // Helper: Zero boundary padding (matches librosa pad_mode='constant')
-        function getSampleZero(y, i) {
-            const L = y.length;
-            if (i < 0 || i >= L) {
-                return 0.0;
-            }
-            return y[i];
-        }
-
-        // 1D Median Filter for HPSS (matches librosa reflect padding boundary mode)
-        function medianFilter1D(arr, winSize) {
-            const L = arr.length;
-            const out = new Float32Array(L);
+        // HPSS — frequency-domain median filter (自适应 kernel + stride 子采样, async chunks)
+        async function computeHPSS(stftMag, numFrames, numBins) {
+            // 自适应 kernel: 长音频用小 kernel 提速 (percussive_energy/hp_ratio 已 ×0.3 降权)
+            let winSize, hChunk, vChunk;
+            if (numFrames < 2600)      { winSize = 31; hChunk = 120; vChunk = 300; }
+            else if (numFrames < 8000) { winSize = 17; hChunk = 80;  vChunk = 200; }
+            else                        { winSize = 11; hChunk = 50;  vChunk = 120; }
             const half = Math.floor(winSize / 2);
-            const window = new Float32Array(winSize);
-            for (let i = 0; i < L; i++) {
-                let count = 0;
-                for (let w = -half; w <= half; w++) {
-                    let idx = i + w;
-                    if (idx < 0) {
-                        idx = -idx;
-                    } else if (idx >= L) {
-                        idx = 2 * L - 2 - idx;
-                    }
-                    window[count++] = arr[idx];
-                }
-                window.sort(); // fast sort for small array
-                out[i] = window[half];
-            }
-            return out;
-        }
 
-        // Mel conversion helpers (matching Librosa Slaney scaling exactly)
-        function hzToMel(hz) {
-            if (hz < 1000) return hz * 3 / 200;
-            return 15.0 + 27.0 * Math.log(hz / 1000.0) / Math.log(6.4);
-        }
-
-        function melToHz(mel) {
-            if (mel < 15.0) return mel * 200 / 3;
-            return 1000.0 * Math.exp((mel - 15.0) * Math.log(6.4) / 27.0);
-        }
-
-        // Generate Slaney normalized Mel Filterbank weights
-        function createMelFilterbank(sr, nFft, nMels) {
-            const fmin = 0;
-            const fmax = sr / 2;
-            const melMin = hzToMel(fmin);
-            const melMax = hzToMel(fmax);
-            const melPoints = new Float32Array(nMels + 2);
-            for (let i = 0; i < nMels + 2; i++) {
-                melPoints[i] = melMin + (melMax - melMin) * i / (nMels + 1);
-            }
-            const hzPoints = new Float32Array(nMels + 2);
-            for (let i = 0; i < nMels + 2; i++) {
-                hzPoints[i] = melToHz(melPoints[i]);
-            }
-            const binPoints = new Float32Array(nMels + 2);
-            for (let i = 0; i < nMels + 2; i++) {
-                binPoints[i] = hzPoints[i] * (nFft / 2) / (sr / 2);
-            }
-            
-            const numBins = nFft / 2 + 1;
-            const weights = [];
-            for (let m = 0; m < nMels; m++) {
-                const w = new Float32Array(numBins);
-                const fLeft = hzPoints[m];
-                const fCenter = hzPoints[m+1];
-                const fRight = hzPoints[m+2];
-                const bLeft = binPoints[m];
-                const bCenter = binPoints[m+1];
-                const bRight = binPoints[m+2];
-                
-                const scale = 2.0 / (fRight - fLeft);
-                for (let k = 0; k < numBins; k++) {
-                    if (k >= bLeft && k <= bRight) {
-                        if (k < bCenter) {
-                            w[k] = (k - bLeft) / (bCenter - bLeft) * scale;
-                        } else {
-                            w[k] = (bRight - k) / (bRight - bCenter) * scale;
-                        }
-                    } else {
-                        w[k] = 0;
-                    }
-                }
-                weights.push(w);
-            }
-            return weights;
-        }
-
-        // Power to dB with ref = 1.0 (matching Librosa's default)
-        // Values are clipped to topDb (80.0) below the peak value
-        function powerToDb(melSpec, topDb = 80.0) {
-            const nMels = melSpec.length;
-            const numFrames = melSpec[0].length;
-            let maxVal = 1e-10;
-            for (let m = 0; m < nMels; m++) {
-                for (let t = 0; t < numFrames; t++) {
-                    if (melSpec[m][t] > maxVal) maxVal = melSpec[m][t];
-                }
-            }
-            const dbSpec = [];
-            for (let m = 0; m < nMels; m++) {
-                dbSpec.push(new Float32Array(numFrames));
-            }
-            const maxDb = 10.0 * Math.log10(maxVal);
-            const floorDb = maxDb - topDb;
-            for (let m = 0; m < nMels; m++) {
-                for (let t = 0; t < numFrames; t++) {
-                    const val = melSpec[m][t];
-                    const db = 10.0 * Math.log10(Math.max(1e-10, val));
-                    dbSpec[m][t] = Math.max(db, floorDb);
-                }
-            }
-            return dbSpec;
-        }
-
-        // Core feature extraction runner
-        async function extractFeatures(y, sr) {
-            const N = 2048;
-            const H = 512;
-            const P = 1024;
-            const L = y.length;
-            const numFrames = Math.floor(L / H) + 1;
-            const win = getHannWindow(N);
-            const numBins = N / 2 + 1; // 1025
-
-            updateProgress(20, '音频波形加载完成，正在执行短时傅里叶变换 (STFT)...');
-            await new Promise(r => setTimeout(r, 50));
-
-            // 1. STFT Forward
-            const stftReal = [];
-            const stftImag = [];
-            const stftMag = [];
-            for (let t = 0; t < numFrames; t++) {
-                const real = new Float32Array(N);
-                const imag = new Float32Array(N);
-                const startIdx = t * H - P;
-                for (let i = 0; i < N; i++) {
-                    real[i] = getSampleZero(y, startIdx + i) * win[i];
-                }
-                fft(real, imag);
-                const rOut = new Float32Array(numBins);
-                const iOut = new Float32Array(numBins);
-                const mOut = new Float32Array(numBins);
-                for (let k = 0; k < numBins; k++) {
-                    rOut[k] = real[k];
-                    iOut[k] = imag[k];
-                    mOut[k] = Math.sqrt(real[k] * real[k] + imag[k] * imag[k]);
-                }
-                stftReal.push(rOut);
-                stftImag.push(iOut);
-                stftMag.push(mOut);
-            }
-
-            updateProgress(40, 'STFT 完成。正在运行声学 HPSS (谐波与敲击分离算法)...');
-            await new Promise(r => setTimeout(r, 50));
-
-            // 2. HPSS Separation
-            const H_filt = [];
-            const P_filt = [];
-            for (let k = 0; k < numBins; k++) {
-                H_filt.push(new Float32Array(numFrames));
-                P_filt.push(new Float32Array(numFrames));
-            }
-            // 2a. Filter along frequency (column by column)
-            for (let t = 0; t < numFrames; t++) {
-                const col = new Float32Array(numBins);
-                for (let k = 0; k < numBins; k++) col[k] = stftMag[t][k];
-                const filt = medianFilter1D(col, 31);
-                for (let k = 0; k < numBins; k++) P_filt[k][t] = filt[k];
-            }
-            // 2b. Filter along time (row by row)
-            for (let k = 0; k < numBins; k++) {
+            // 水平方向子采样 stride (仅对超长音频)
+            const hStride = numFrames > 15000 ? 2 : 1;
+            const H_filt = Array.from({length: numBins}, () => new Float32Array(numFrames));
+            for (let k = 0; k < numBins; k += hStride) {
                 const row = new Float32Array(numFrames);
                 for (let t = 0; t < numFrames; t++) row[t] = stftMag[t][k];
-                const filt = medianFilter1D(row, 31);
-                for (let t = 0; t < numFrames; t++) H_filt[k][t] = filt[t];
+                const filt = new Float32Array(numFrames);
+                for (let i = 0; i < numFrames; i++) {
+                    const w = [];
+                    for (let d = -half; d <= half; d++) {
+                        let idx = i + d;
+                        if (idx < 0) idx = -idx;
+                        else if (idx >= numFrames) idx = 2 * numFrames - 2 - idx;
+                        w.push(row[idx]);
+                    }
+                    w.sort((a, b) => a - b);
+                    filt[i] = w[half];
+                }
+                // 填充当前 bin + stride 内跳过的 bin (最近邻)
+                const end = Math.min(k + hStride, numBins);
+                for (let kk = k; kk < end; kk++) {
+                    for (let t = 0; t < numFrames; t++) H_filt[kk][t] = filt[t];
+                }
+                if (k % hChunk === 0 && k > 0) await _yield();
             }
-            // 2c. Soft masks and reconstruction
-            const eps = 1e-6;
-            const maskH = [];
-            const maskP = [];
-            for (let k = 0; k < numBins; k++) {
-                maskH.push(new Float32Array(numFrames));
-                maskP.push(new Float32Array(numFrames));
-                for (let t = 0; t < numFrames; t++) {
+
+            // 垂直方向子采样 stride
+            const vStride = numFrames > 15000 ? 2 : 1;
+            const P_filt = Array.from({length: numBins}, () => new Float32Array(numFrames));
+            for (let t = 0; t < numFrames; t += vStride) {
+                const col = new Float32Array(numBins);
+                for (let k = 0; k < numBins; k++) col[k] = stftMag[t][k];
+                const filt = new Float32Array(numBins);
+                for (let i = 0; i < numBins; i++) {
+                    const w = [];
+                    for (let d = -half; d <= half; d++) {
+                        let idx = i + d;
+                        if (idx < 0) idx = -idx;
+                        else if (idx >= numBins) idx = 2 * numBins - 2 - idx;
+                        w.push(col[idx]);
+                    }
+                    w.sort((a, b) => a - b);
+                    filt[i] = w[half];
+                }
+                // 填充当前 frame + stride 内跳过的 frame
+                const end = Math.min(t + vStride, numFrames);
+                for (let tt = t; tt < end; tt++) {
+                    for (let k = 0; k < numBins; k++) P_filt[k][tt] = filt[k];
+                }
+                if (t % vChunk === 0 && t > 0) await _yield();
+            }
+
+            // 能量累加 (stride=2, 保持原有)
+            const eps = 1e-6, eStride = 2;
+            let sumSqP = 0, sumSqH = 0, cells = 0;
+            for (let t = 0; t < numFrames; t += eStride) {
+                for (let k = 0; k < numBins; k += eStride) {
                     const h2 = H_filt[k][t] * H_filt[k][t];
                     const p2 = P_filt[k][t] * P_filt[k][t];
                     const sum = h2 + p2 + eps;
-                    maskH[k][t] = h2 / sum;
-                    maskP[k][t] = p2 / sum;
+                    const mh = h2 / sum, mp = p2 / sum;
+                    const mag = stftMag[t][k];
+                    sumSqH += (mag * mh) * (mag * mh);
+                    sumSqP += (mag * mp) * (mag * mp);
+                    cells++;
                 }
             }
-            const harmonicReal = [];
-            const harmonicImag = [];
-            const percussiveReal = [];
-            const percussiveImag = [];
-            for (let t = 0; t < numFrames; t++) {
-                harmonicReal.push(new Float32Array(numBins));
-                harmonicImag.push(new Float32Array(numBins));
-                percussiveReal.push(new Float32Array(numBins));
-                percussiveImag.push(new Float32Array(numBins));
-                for (let k = 0; k < numBins; k++) {
-                    harmonicReal[t][k] = stftReal[t][k] * maskH[k][t];
-                    harmonicImag[t][k] = stftImag[t][k] * maskH[k][t];
-                    percussiveReal[t][k] = stftReal[t][k] * maskP[k][t];
-                    percussiveImag[t][k] = stftImag[t][k] * maskP[k][t];
-                }
-            }
+            return {
+                percussive_energy: Math.sqrt(sumSqP / (cells || 1)),
+                hp_ratio: Math.sqrt(sumSqH / (cells || 1)) / (Math.sqrt(sumSqP / (cells || 1)) + 1e-6)
+            };
+        }
 
-            updateProgress(60, 'HPSS 分离完成。正在执行频域能量提取...');
-            await new Promise(r => setTimeout(r, 50));
-
-            // --- HPSS 纯频域 RMS (免 ISTFT，与 Python 对齐并大幅加速) ---
-            let sumSqP = 0, sumSqH = 0;
-            const totalCells = numFrames * numBins;
-            for (let t = 0; t < numFrames; t++) {
-                for (let k = 0; k < numBins; k++) {
-                    sumSqP += percussiveReal[t][k] * percussiveReal[t][k] + percussiveImag[t][k] * percussiveImag[t][k];
-                    sumSqH += harmonicReal[t][k] * harmonicReal[t][k] + harmonicImag[t][k] * harmonicImag[t][k];
-                }
-            }
-            const perPercEnergy = Math.sqrt(sumSqP / totalCells);
-            const harEnergy = Math.sqrt(sumSqH / totalCells);
-            const hpRatio = harEnergy / (perPercEnergy + 1e-6);
-
-            updateProgress(75, '频域特征提取完成。正在计算 20维梅尔倒谱系数 (MFCC)...');
-            await new Promise(r => setTimeout(r, 50));
-
-            // 3. Mel & MFCCs
-            const nMels = 128;
-            const melWeights = createMelFilterbank(sr, N, nMels);
-            const melSpec = [];
-            for (let m = 0; m < nMels; m++) {
-                melSpec.push(new Float32Array(numFrames));
-            }
-            for (let t = 0; t < numFrames; t++) {
-                for (let m = 0; m < nMels; m++) {
-                    let sum = 0;
-                    for (let k = 0; k < numBins; k++) {
-                        sum += melWeights[m][k] * (stftMag[t][k] * stftMag[t][k]);
-                    }
-                    melSpec[m][t] = sum;
-                }
-            }
-            const dbSpec = powerToDb(melSpec);
-
-            // Compute DCT matrix for MFCC (K = 128, n_mfcc = 20)
-            const nMfcc = 20;
-            const dctMatrix = [];
-            for (let i = 0; i < nMfcc; i++) {
-                const row = new Float32Array(nMels);
-                const alpha = (i === 0) ? Math.sqrt(1 / nMels) : Math.sqrt(2 / nMels);
-                for (let m = 0; m < nMels; m++) {
-                    row[m] = alpha * Math.cos(Math.PI / nMels * (m + 0.5) * i);
-                }
-                dctMatrix.push(row);
-            }
-            const mfccs = [];
-            for (let i = 0; i < nMfcc; i++) {
-                mfccs.push(new Float32Array(numFrames));
-            }
-            for (let t = 0; t < numFrames; t++) {
-                for (let i = 0; i < nMfcc; i++) {
-                    let val = 0;
-                    for (let m = 0; m < nMels; m++) {
-                        val += dctMatrix[i][m] * dbSpec[m][t];
-                    }
-                    mfccs[i][t] = val;
-                }
-            }
-
-            // Compute Onset strength
-            const onsetEnv = computeOnsetStrength(dbSpec);
-            let sumOnset = 0;
-            for (let t = 0; t < numFrames; t++) sumOnset += onsetEnv[t];
-            const onsetMean = sumOnset / numFrames;
-            let sumOnsetSq = 0;
-            for (let t = 0; t < numFrames; t++) {
-                const diff = onsetEnv[t] - onsetMean;
-                sumOnsetSq += diff * diff;
-            }
-            const onsetVar = sumOnsetSq / numFrames;
-
-            // Helper: Onset computation
-            function computeOnsetStrength(dbSpec) {
-                const diff = new Float32Array(numFrames - 1);
-                for (let t = 1; t < numFrames; t++) {
-                    let sumDiff = 0;
-                    for (let m = 0; m < nMels; m++) {
-                        const d = dbSpec[m][t] - dbSpec[m][t-1];
-                        if (d > 0) sumDiff += d;
-                    }
-                    diff[t-1] = sumDiff / nMels;
-                }
-                const onset = new Float32Array(numFrames);
-                for (let t = 0; t < numFrames; t++) {
-                    onset[t] = t < 3 ? 0.0 : diff[t-3];
-                }
-                return onset;
-            }
-
-            updateProgress(75, '统计谱心 (Spectral Centroid) 与谱滚降 (Spectral Rolloff)...');
-            await new Promise(r => setTimeout(r, 50));
-
-            // Spectral Centroid
-            const freqs = new Float32Array(numBins);
-            for (let k = 0; k < numBins; k++) freqs[k] = k * sr / N;
-            const centroids = new Float32Array(numFrames);
-            for (let t = 0; t < numFrames; t++) {
-                let num = 0;
-                let den = 0;
-                for (let k = 0; k < numBins; k++) {
-                    num += freqs[k] * stftMag[t][k];
-                    den += stftMag[t][k];
-                }
-                centroids[t] = num / (den + 1e-10);
-            }
-            let sumCentroid = 0;
-            for (let t = 0; t < numFrames; t++) sumCentroid += centroids[t];
-            const centroidMean = sumCentroid / numFrames;
-            let sumCentroidSq = 0;
-            for (let t = 0; t < numFrames; t++) {
-                const diff = centroids[t] - centroidMean;
-                sumCentroidSq += diff * diff;
-            }
-            const centroidStd = Math.sqrt(sumCentroidSq / numFrames);
-
-            // Spectral Rolloff
-            const rolloffs = new Float32Array(numFrames);
-            for (let t = 0; t < numFrames; t++) {
-                let total = 0;
-                for (let k = 0; k < numBins; k++) total += stftMag[t][k];
-                const threshold = 0.85 * total;
-                let cum = 0;
-                let K = 0;
-                for (let k = 0; k < numBins; k++) {
-                    cum += stftMag[t][k];
-                    if (cum >= threshold) {
-                        K = k;
-                        break;
-                    }
-                }
-                rolloffs[t] = K * sr / N;
-            }
-            let sumRolloff = 0;
-            for (let t = 0; t < numFrames; t++) sumRolloff += rolloffs[t];
-            const rolloffMean = sumRolloff / numFrames;
-            let sumRolloffSq = 0;
-            for (let t = 0; t < numFrames; t++) {
-                const diff = rolloffs[t] - rolloffMean;
-                sumRolloffSq += diff * diff;
-            }
-            const rolloffStd = Math.sqrt(sumRolloffSq / numFrames);
-
-            // ─────────────────────────────────────────
-            // ★ 新增特征计算 (50维 → 总 97 维)
-            // ─────────────────────────────────────────
-            updateProgress(82, '计算谱对比度 (Spectral Contrast 7 bands)...');
-            await new Promise(r => setTimeout(r, 50));
-
-            // === Spectral Contrast (14维: 7 bands × mean+std) ===
-            const nContrastBands = 6;
-            const contrastFmin = 200.0;
-            const neighborRatio = 0.02;
-            // Precompute band edges
-            const bandEdges = [0, contrastFmin];
-            for (let b = 1; b < nContrastBands; b++) {
-                bandEdges.push(contrastFmin * Math.pow(2, b));
-            }
-            // Clip last edge to Nyquist
-            bandEdges[nContrastBands] = Math.min(bandEdges[nContrastBands], sr / 2);
-            // Map band edges to FFT bin indices
+        // Spectral Contrast — per-octave peak-valley difference (optimized: O(n) partial select vs full sort)
+        function computeSpectralContrast(stftMag, sr, numFrames, numBins) {
+            const nBands = 6, fmin = 200.0, nr = 0.02;
+            const edges = [0, fmin];
+            for (let b = 1; b < nBands; b++) edges.push(fmin * Math.pow(2, b));
+            edges[nBands] = Math.min(edges[nBands], sr / 2);
             const bandBins = [];
-            for (let b = 0; b < nContrastBands; b++) {
-                const lo = bandEdges[b];
-                const hi = bandEdges[b + 1];
-                const bins = [];
+            for (let b = 0; b < nBands; b++) {
+                const lo = edges[b], hi = edges[b + 1], bins = [];
                 for (let k = 0; k < numBins; k++) {
-                    if (freqs[k] >= lo && freqs[k] < hi) bins.push(k);
+                    const f = k * sr / (2 * (numBins - 1));
+                    if (f >= lo && f < hi) bins.push(k);
                 }
                 bandBins.push(bins);
             }
-            const contrastFrames = [];
-            for (let b = 0; b < nContrastBands; b++) {
-                contrastFrames.push(new Float32Array(numFrames));
-            }
-            for (let t = 0; t < numFrames; t++) {
-                for (let b = 0; b < nContrastBands; b++) {
-                    const bins = bandBins[b];
-                    if (bins.length === 0) {
-                        contrastFrames[b][t] = 0;
-                        continue;
+            // 辅助: O(n) 获取 topK 和 bottomK (K 小，免排序)
+            function topBottomK(arr, k) {
+                if (k >= arr.length / 3) { // 退化: 直接排序
+                    const s = new Float32Array(arr); s.sort((x, y) => y - x);
+                    let p = 0, v = 0;
+                    for (let i = 0; i < k; i++) p += s[i];
+                    for (let i = 0; i < k; i++) v += s[s.length - 1 - i];
+                    return { peak: p / k, valley: v / k };
+                }
+                const top = new Float32Array(k).fill(-Infinity);
+                const bot = new Float32Array(k).fill(Infinity);
+                for (let i = 0; i < arr.length; i++) {
+                    const val = arr[i];
+                    for (let j = 0; j < k; j++) {
+                        if (val > top[j]) {
+                            for (let m = k - 1; m > j; m--) top[m] = top[m - 1];
+                            top[j] = val; break;
+                        }
                     }
-                    const vals = [];
-                    for (let idx of bins) vals.push(stftMag[t][idx]);
-                    vals.sort((a, b) => b - a); // descending
-                    const kk = Math.max(1, Math.round(neighborRatio * vals.length));
-                    let peakSum = 0, valleySum = 0;
-                    for (let i = 0; i < kk; i++) peakSum += vals[i];
-                    for (let i = 0; i < kk; i++) valleySum += vals[vals.length - 1 - i];
-                    const peakMean = peakSum / kk;
-                    const valleyMean = valleySum / kk;
-                    contrastFrames[b][t] = peakMean - valleyMean;
+                    for (let j = 0; j < k; j++) {
+                        if (val < bot[j]) {
+                            for (let m = k - 1; m > j; m--) bot[m] = bot[m - 1];
+                            bot[j] = val; break;
+                        }
+                    }
                 }
+                let p = 0, v = 0;
+                for (let i = 0; i < k; i++) p += top[i];
+                for (let i = 0; i < k; i++) v += bot[i];
+                return { peak: p / k, valley: v / k };
             }
-            const contrastStats = {};
-            for (let b = 0; b < nContrastBands; b++) {
-                let s = 0;
-                for (let t = 0; t < numFrames; t++) s += contrastFrames[b][t];
-                const mean = s / numFrames;
-                let sq = 0;
+            const result = {};
+            for (let b = 0; b < nBands; b++) {
+                const bins = bandBins[b];
+                if (bins.length === 0) {
+                    result[`spectral_contrast_${b + 1}_mean`] = 0;
+                    result[`spectral_contrast_${b + 1}_std`] = 0;
+                    continue;
+                }
+                const kk = Math.max(1, Math.round(nr * bins.length));
+                const vals = new Float32Array(numFrames);
+                // 预分配缓存数组，避免每帧重复分配
+                const cache = new Float32Array(bins.length);
                 for (let t = 0; t < numFrames; t++) {
-                    const d = contrastFrames[b][t] - mean;
-                    sq += d * d;
+                    for (let i = 0; i < bins.length; i++) cache[i] = stftMag[t][bins[i]];
+                    const { peak, valley } = topBottomK(cache, kk);
+                    vals[t] = peak - valley;
                 }
-                contrastStats[`spectral_contrast_${b+1}_mean`] = mean;
-                contrastStats[`spectral_contrast_${b+1}_std`] = Math.sqrt(sq / numFrames);
+                result[`spectral_contrast_${b + 1}_mean`] = mean(vals);
+                result[`spectral_contrast_${b + 1}_std`] = std(vals);
             }
+            return result;
+        }
 
-            updateProgress(87, '计算过零率 (Zero-Crossing Rate)...');
+        // Tonnetz — linear combinations of chroma
+        function computeTonnetz(chromaFrames) {
+            const maps = [
+                [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0],
+                [0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0],
+                [0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0],
+                [0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1],
+                [1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1]
+            ];
+            const nFrames = chromaFrames[0].length;
+            const result = {};
+            for (let i = 0; i < 6; i++) {
+                const row = new Float32Array(nFrames);
+                for (let t = 0; t < nFrames; t++) {
+                    let v = 0;
+                    for (let c = 0; c < 12; c++) v += maps[i][c] * chromaFrames[c][t];
+                    row[t] = v;
+                }
+                result[`tonnetz_${i + 1}_mean`] = mean(row);
+                result[`tonnetz_${i + 1}_std`] = std(row);
+            }
+            return result;
+        }
+
+        // ========== 异步分块辅助 ==========
+        function _yield() {
+            return new Promise(r => setTimeout(r, 0));
+        }
+
+        // ========== MFCC: 128-mel filterbank + power_to_db + DCT-II (对齐 librosa) ==========
+        const _melCache = {};
+        function _buildMelFilters(sr, numBins, n_mels) {
+            const key = `${sr}_${numBins}_${n_mels}`;
+            if (_melCache[key]) return _melCache[key];
+            const hz2mel = f => 2595.0 * Math.log10(1.0 + f / 700.0);
+            const mel2hz = m => 700.0 * (Math.pow(10.0, m / 2595.0) - 1.0);
+            const melMin = hz2mel(0), melMax = hz2mel(sr / 2);
+            const melPts = new Float32Array(n_mels + 2);
+            for (let i = 0; i < n_mels + 2; i++) melPts[i] = melMin + (melMax - melMin) * i / (n_mels + 1);
+
+            const filters = [];
+            for (let m = 0; m < n_mels; m++) {
+                const f = new Float32Array(numBins);
+                const loHz = mel2hz(melPts[m]), cenHz = mel2hz(melPts[m + 1]), hiHz = mel2hz(melPts[m + 2]);
+                for (let k = 0; k < numBins; k++) {
+                    const hz = k * sr / (2 * (numBins - 1));
+                    if (hz <= loHz || hz >= hiHz) f[k] = 0;
+                    else if (hz < cenHz) f[k] = (hz - loHz) / (cenHz - loHz);
+                    else f[k] = (hiHz - hz) / (hiHz - cenHz);
+                }
+                // Slaney 单位面积归一化 (对齐 librosa norm='slaney' 默认值)
+                const areaNorm = 2.0 / (hiHz - loHz + 1e-10);
+                for (let k = 0; k < numBins; k++) f[k] *= areaNorm;
+                filters.push(f);
+            }
+            _melCache[key] = filters;
+            return filters;
+        }
+
+        const _dctCache = {};
+        function _buildDCT(n_mfcc, n_mels) {
+            const key = `${n_mfcc}_${n_mels}`;
+            if (_dctCache[key]) return _dctCache[key];
+            const rows = [];
+            for (let i = 0; i < n_mfcc; i++) {
+                const r = new Float32Array(n_mels);
+                for (let j = 0; j < n_mels; j++) r[j] = Math.cos(Math.PI * i * (j + 0.5) / n_mels);
+                rows.push(r);
+            }
+            _dctCache[key] = rows;
+            return rows;
+        }
+
+        async function _computeMFCC(stftMag, sr, numBins, nFrames) {
+            const n_mels = 128, n_mfcc = 20, CHUNK = 200;
+            const melFilters = _buildMelFilters(sr, numBins, n_mels);
+            const dct = _buildDCT(n_mfcc, n_mels);
+            const mfccs = Array.from({length: n_mfcc}, () => new Float32Array(nFrames));
+            const melEnergies = new Float32Array(n_mels);
+            const melDB = new Float32Array(n_mels);
+            const AMIN = 1e-10, TOP_DB = 80.0;
+
+            for (let t = 0; t < nFrames; t++) {
+                const mag = stftMag[t];
+                for (let m = 0; m < n_mels; m++) {
+                    let e = 0;
+                    const fbank = melFilters[m];
+                    for (let k = 0; k < numBins; k++) e += mag[k] * fbank[k];
+                    melEnergies[m] = e;
+                }
+                let maxDB = -Infinity;
+                for (let m = 0; m < n_mels; m++) {
+                    const db = 10.0 * Math.log10(Math.max(melEnergies[m], AMIN));
+                    melDB[m] = db;
+                    if (db > maxDB) maxDB = db;
+                }
+                const floorDB = maxDB - TOP_DB;
+                for (let m = 0; m < n_mels; m++) {
+                    if (melDB[m] < floorDB) melDB[m] = floorDB;
+                }
+                for (let i = 0; i < n_mfcc; i++) {
+                    let v = 0;
+                    const drow = dct[i];
+                    for (let j = 0; j < n_mels; j++) v += melDB[j] * drow[j];
+                    mfccs[i][t] = v;
+                }
+                if (t % CHUNK === 0 && t > 0) await _yield();
+            }
+            return mfccs;
+        }
+
+        // ========== Chroma: chroma_stft 风格映射 (对齐 librosa) ==========
+        const _chromaWeightsCache = {};
+        function _buildChromaWeights(sr, numBins) {
+            const key = `${sr}_${numBins}`;
+            if (_chromaWeightsCache[key]) return _chromaWeightsCache[key];
+            const A4 = 440.0, nC = 12;
+            const w = Array.from({length: nC}, () => new Float32Array(numBins));
+            for (let k = 1; k < numBins; k++) {
+                const f = k * sr / (2 * (numBins - 1));
+                if (f <= 0) continue;
+                const midi = 12.0 * Math.log2(f / A4) + 69.0;
+                const c0 = (((Math.floor(midi) % nC) + nC) % nC);
+                const c1 = (((Math.floor(midi) + 1) % nC) + nC) % nC;
+                const frac = midi - Math.floor(midi);
+                w[c0][k] += (1.0 - frac);
+                w[c1][k] += frac;
+            }
+            _chromaWeightsCache[key] = w;
+            return w;
+        }
+
+        async function _computeChroma(stftMag, sr, numBins, nFrames) {
+            const CHUNK = 300;
+            const weights = _buildChromaWeights(sr, numBins);
+            const nC = 12;
+            const chroma = Array.from({length: nC}, () => new Float32Array(nFrames));
+
+            for (let t = 0; t < nFrames; t++) {
+                const mag = stftMag[t];
+                for (let c = 0; c < nC; c++) {
+                    let v = 0;
+                    const w = weights[c];
+                    for (let k = 1; k < numBins; k++) v += mag[k] * w[k];
+                    chroma[c][t] = v;
+                }
+                let norm = 0;
+                for (let c = 0; c < nC; c++) norm += chroma[c][t] * chroma[c][t];
+                norm = Math.sqrt(norm) + 1e-10;
+                for (let c = 0; c < nC; c++) chroma[c][t] /= norm;
+                if (t % CHUNK === 0 && t > 0) await _yield();
+            }
+            return chroma;
+        }
+
+        // ========== Onset Strength (对齐 librosa onset_strength) ==========
+        async function _computeOnsetStrength(stftMag, numBins, nFrames) {
+            const CHUNK = 500;
+            const onset = new Float32Array(nFrames);
+            for (let t = 1; t < nFrames; t++) {
+                let sum = 0;
+                for (let k = 0; k < numBins; k++) sum += stftMag[t][k] - stftMag[t - 1][k];
+                onset[t] = sum / numBins;
+                if (t % CHUNK === 0) await _yield();
+            }
+            if (nFrames > 0) onset[0] = 0;
+            let sum = 0;
+            for (let t = 0; t < nFrames; t++) sum += onset[t];
+            const dc = sum / Math.max(nFrames, 1);
+            for (let t = 0; t < nFrames; t++) onset[t] -= dc;
+            return onset;
+        }
+
+        // ========== Spectral Centroid (对齐 librosa) ==========
+        function _computeCentroid(stftMag, sr, numBins, nFrames) {
+            const centroids = new Float32Array(nFrames);
+            for (let t = 0; t < nFrames; t++) {
+                const mag = stftMag[t];
+                let sumW = 0, sumWF = 0;
+                for (let k = 0; k < numBins; k++) {
+                    sumW += mag[k];
+                    sumWF += k * mag[k];
+                }
+                centroids[t] = sumW > 0 ? (sumWF / sumW) * sr / (2 * (numBins - 1)) : 0;
+            }
+            return centroids;
+        }
+
+        // ========== Spectral Rolloff (对齐 librosa, roll_percent=0.85) ==========
+        function _computeRolloff(stftMag, sr, numBins, nFrames, rollPercent) {
+            const rolloffs = new Float32Array(nFrames);
+            for (let t = 0; t < nFrames; t++) {
+                const mag = stftMag[t];
+                let total = 0;
+                for (let k = 0; k < numBins; k++) total += mag[k];
+                const threshold = total * rollPercent;
+                let cumsum = 0, idx = 0;
+                for (let k = 0; k < numBins; k++) {
+                    cumsum += mag[k];
+                    if (cumsum >= threshold) { idx = k; break; }
+                }
+                rolloffs[t] = idx / (numBins - 1) * (sr / 2);
+            }
+            return rolloffs;
+        }
+
+        // ========== ZCR (对齐 librosa, 原始信号无窗) ==========
+        function _computeZCR(y, N, H, nFrames) {
+            const zcrs = new Float32Array(nFrames);
+            for (let t = 0; t < nFrames; t++) {
+                const start = t * H;
+                let crosses = 0;
+                for (let i = 1; i < N; i++) {
+                    if ((y[start + i] >= 0) !== (y[start + i - 1] >= 0)) crosses++;
+                }
+                zcrs[t] = crosses / (N - 1);
+            }
+            return zcrs;
+        }
+
+        // ========== Main Feature Extraction (重写: 对齐 1.py librosa 管线) ==========
+        async function extractFeatures(y, sr) {
+            const N = 2048, H = 512;
+            const L = y.length;
+            const nFrames = Math.floor((L - N) / H) + 1;
+            const numBins = N / 2 + 1;
+
+            // 仅用 Meyda 获取 amplitudeSpectrum（hanning 窗 STFT 幅度谱）
+            Meyda.bufferSize = N;
+            Meyda.sampleRate = sr;
+            Meyda.windowingFunction = 'hanning';
+
+            updateProgress(15, 'STFT 帧级提取...');
             await new Promise(r => setTimeout(r, 50));
 
-            // === Zero-Crossing Rate (2维: mean+std) ===
-            const zcrFrameLen = N;
-            const zcrHop = H;
-            const zcrNumFrames = Math.floor((L - zcrFrameLen) / zcrHop) + 1;
-            const zcrVals = new Float32Array(zcrNumFrames);
-            for (let t = 0; t < zcrNumFrames; t++) {
-                const start = t * zcrHop;
-                let crossings = 0;
-                for (let i = 0; i < zcrFrameLen - 1; i++) {
-                    const idx = start + i;
-                    if (idx + 1 >= L) break;
-                    if ((y[idx] >= 0) !== (y[idx + 1] >= 0)) crossings++;
-                }
-                zcrVals[t] = crossings / zcrFrameLen;
-            }
-            let zcrSum = 0;
-            for (let t = 0; t < zcrNumFrames; t++) zcrSum += zcrVals[t];
-            const zcrMean = zcrSum / zcrNumFrames;
-            let zcrSq = 0;
-            for (let t = 0; t < zcrNumFrames; t++) {
-                const d = zcrVals[t] - zcrMean;
-                zcrSq += d * d;
-            }
-            const zcrStd = Math.sqrt(zcrSq / zcrNumFrames);
+            const stftMag = [];
+            const centroids = new Float32Array(nFrames);
+            const rolloffs = new Float32Array(nFrames);
+            const rollPercent = 0.85;
 
-            updateProgress(95, '61维特征提取完毕，正在通过 ONNX Runtime Web 进行边缘计算模型推理...');
+            // 单次遍历: 构建 stftMag + 实时计算 centroid/rolloff
+            const STFT_CHUNK = 300;
+            for (let t = 0; t < nFrames; t++) {
+                const start = t * H;
+                const frame = y.slice(start, start + N);
+                const feats = Meyda.extract(['amplitudeSpectrum'], frame);
+                const amp = feats.amplitudeSpectrum;
+                const mag = new Float32Array(numBins);
+                if (amp) for (let k = 0; k < Math.min(numBins, amp.length); k++) mag[k] = amp[k];
+                stftMag.push(mag);
+
+                // spectral centroid (inline, 免二次遍历)
+                let sumW = 0, sumWF = 0;
+                for (let k = 0; k < numBins; k++) { sumW += mag[k]; sumWF += k * mag[k]; }
+                centroids[t] = sumW > 0 ? (sumWF / sumW) * sr / (2 * (numBins - 1)) : 0;
+
+                // spectral rolloff (inline)
+                let total = 0;
+                for (let k = 0; k < numBins; k++) total += mag[k];
+                const thresh = total * rollPercent;
+                let cs = 0, ri = 0;
+                for (let k = 0; k < numBins; k++) { cs += mag[k]; if (cs >= thresh) { ri = k; break; } }
+                rolloffs[t] = ri / (numBins - 1) * (sr / 2);
+                if (t % STFT_CHUNK === 0 && t > 0) await _yield();
+            }
+
+            updateProgress(35, 'MFCC 128-mel filterbank + power_to_db + DCT-II...');
             await new Promise(r => setTimeout(r, 50));
 
-            // Pack features (61 dims)
-            // Base features (★ 特征权重调整)
-            const features = {
-                'percussive_energy': perPercEnergy * 0.3,  // 降权
-                'hp_ratio': hpRatio * 0.3,                  // 降权
-                'spectral_flux_mean': onsetMean,
-                'spectral_flux_var': onsetVar,
-                'centroid_mean': centroidMean,
-                'centroid_std': centroidStd,
-                'rolloff_std': rolloffStd
-            };
-            // MFCCs (40 dims)
-            for (let i = 0; i < nMfcc; i++) {
-                let sumVal = 0;
-                for (let t = 0; t < numFrames; t++) sumVal += mfccs[i][t];
-                const mean = sumVal / numFrames;
-                let sumSq = 0;
-                for (let t = 0; t < numFrames; t++) {
-                    const diff = mfccs[i][t] - mean;
-                    sumSq += diff * diff;
-                }
-                const std = Math.sqrt(sumSq / numFrames);
-                features[`mfcc_${i+1}_mean`] = mean;
-                features[`mfcc_${i+1}_std`] = std;
+            // MFCC: 128 mel滤波器 + dB转换 + DCT-II (对齐 librosa)
+            const mfccs = await _computeMFCC(stftMag, sr, numBins, nFrames);
+
+            updateProgress(50, 'Chroma chroma_stft 风格映射 + L2归一化...');
+            await new Promise(r => setTimeout(r, 50));
+
+            // Chroma: chroma_stft 加权映射 + L2 归一化
+            const chromaFrames = await _computeChroma(stftMag, sr, numBins, nFrames);
+
+            updateProgress(65, 'Onset Strength / ZCR / HPSS...');
+            await new Promise(r => setTimeout(r, 50));
+
+            // Onset Strength: onset_strength 风格 (detrend=True)
+            const fluxes = await _computeOnsetStrength(stftMag, numBins, nFrames);
+
+            // ZCR: 原始信号无窗计算
+            const zcrs = _computeZCR(y, N, H, nFrames);
+
+            // HPSS
+            const hpss = await computeHPSS(stftMag, nFrames, numBins);
+
+            // Spectral Contrast
+            const contrast = computeSpectralContrast(stftMag, sr, nFrames, numBins);
+
+            // Tonnetz (基于 chroma)
+            const tonnetz = computeTonnetz(chromaFrames);
+
+            updateProgress(95, '97维特征组装完毕，送入 ONNX 推理...');
+            await new Promise(r => setTimeout(r, 50));
+
+            // 组装 features 字典
+            const features = {};
+
+            for (let i = 0; i < 20; i++) {
+                features[`mfcc_${i + 1}_mean`] = mean(mfccs[i]);
+                features[`mfcc_${i + 1}_std`] = std(mfccs[i]);
             }
-            // Spectral Contrast (12 dims)
-            Object.assign(features, contrastStats);
-            // ZCR (2 dims)
-            features['zcr_mean'] = zcrMean;
-            features['zcr_std'] = zcrStd;
+            features['centroid_mean'] = mean(centroids);
+            features['centroid_std'] = std(centroids);
+            features['rolloff_std'] = std(rolloffs);
+            features['spectral_flux_mean'] = mean(fluxes);
+            features['spectral_flux_var'] = var_(fluxes);
+            features['zcr_mean'] = mean(zcrs);
+            features['zcr_std'] = std(zcrs);
+            for (let i = 0; i < 12; i++) {
+                features[`chroma_${i + 1}_mean`] = mean(chromaFrames[i]);
+                features[`chroma_${i + 1}_std`] = std(chromaFrames[i]);
+            }
+            features['percussive_energy'] = hpss.percussive_energy;
+            features['hp_ratio'] = hpss.hp_ratio;
+            Object.assign(features, contrast);
+            Object.assign(features, tonnetz);
 
             return features;
         }
@@ -1380,13 +1369,15 @@
                 const sr = audioBuffer.sampleRate;
                 const duration = audioBuffer.duration;
 
+                updateProgress(12, `音频 ${duration.toFixed(1)}s，开始 STFT 特征提取...`);
+
                 // ★ RMS 响度归一化 (LUFS 近似，目标 -23 dBFS) — 对齐 Python LUFS 归一化
                 {
                     let sumSq = 0;
                     for (let i = 0; i < signal.length; i++) sumSq += signal[i] * signal[i];
                     const rms = Math.sqrt(sumSq / signal.length);
                     if (rms > 1e-8) {
-                        const targetRms = 0.0901; // 10^(-20.9/20), matches -23 LUFS typical RMS level
+                        const targetRms = 0.07079; // 10^(-23/20) = -23 dBFS, 对齐 extract_fast.py
                         const gain = targetRms / rms;
                         for (let i = 0; i < signal.length; i++) signal[i] *= gain;
                     }
@@ -1395,17 +1386,12 @@
                 // Extract features
                 const features = await extractFeatures(signal, sr);
 
-                // ★ 提权关键特征 ×3 (与训练数据对齐)
-                const ampCols = [7, 16, 19, 20];
-                for (const i of ampCols) {
-                    features[`mfcc_${i}_mean`] *= 3.0;
-                    features[`mfcc_${i}_std`] *= 3.0;
-                }
-                for (const k of ['rolloff_std', 'centroid_std', 'zcr_std']) {
-                    features[k] *= 3.0;
-                }
+                // ★ 降权 percussive_energy / hp_ratio (与 1.py RandomForest 训练对齐)
+                features['percussive_energy'] *= 0.3;
+                features['hp_ratio'] *= 0.3;
 
                 // Compile input array (97 dims)
+                // 97维特征输出 (与 1.py extract_deepfake_audio_features 完全一致)
                 const featureOrder = [
                     'percussive_energy', 'hp_ratio', 'spectral_flux_mean', 'spectral_flux_var',
                     'centroid_mean', 'centroid_std',
@@ -1420,32 +1406,75 @@
                     'mfcc_17_mean', 'mfcc_17_std', 'mfcc_18_mean', 'mfcc_18_std',
                     'mfcc_19_mean', 'mfcc_19_std', 'mfcc_20_mean', 'mfcc_20_std',
                     'rolloff_std',
-                    // ★ 新增 50 维
                     'spectral_contrast_1_mean', 'spectral_contrast_1_std',
                     'spectral_contrast_2_mean', 'spectral_contrast_2_std',
                     'spectral_contrast_3_mean', 'spectral_contrast_3_std',
                     'spectral_contrast_4_mean', 'spectral_contrast_4_std',
                     'spectral_contrast_5_mean', 'spectral_contrast_5_std',
                     'spectral_contrast_6_mean', 'spectral_contrast_6_std',
+                    'chroma_1_mean', 'chroma_1_std', 'chroma_2_mean', 'chroma_2_std',
+                    'chroma_3_mean', 'chroma_3_std', 'chroma_4_mean', 'chroma_4_std',
+                    'chroma_5_mean', 'chroma_5_std', 'chroma_6_mean', 'chroma_6_std',
+                    'chroma_7_mean', 'chroma_7_std', 'chroma_8_mean', 'chroma_8_std',
+                    'chroma_9_mean', 'chroma_9_std', 'chroma_10_mean', 'chroma_10_std',
+                    'chroma_11_mean', 'chroma_11_std', 'chroma_12_mean', 'chroma_12_std',
+                    'tonnetz_1_mean', 'tonnetz_1_std', 'tonnetz_2_mean', 'tonnetz_2_std',
+                    'tonnetz_3_mean', 'tonnetz_3_std', 'tonnetz_4_mean', 'tonnetz_4_std',
+                    'tonnetz_5_mean', 'tonnetz_5_std', 'tonnetz_6_mean', 'tonnetz_6_std',
                     'zcr_mean', 'zcr_std'
                 ];
                 
-                const NUM_FEATURES = 61;
+                const NUM_FEATURES = 97;
                 const inputData = new Float32Array(NUM_FEATURES);
+                let nanCount = 0;
                 for (let i = 0; i < NUM_FEATURES; i++) {
-                    inputData[i] = features[featureOrder[i]];
+                    const v = features[featureOrder[i]];
+                    if (!isFinite(v)) { inputData[i] = 0; nanCount++; }
+                    else inputData[i] = v;
                 }
+                if (nanCount > 0) console.warn('[特征] 检测到', nanCount, '个 NaN/Inf 特征，已置零');
 
                 // ONNX Inference
                 const tensorX = new ort.Tensor('float32', inputData, [1, NUM_FEATURES]);
-                const results = await onnxSession.run({ X: tensorX });
                 
-                // Get output
-                const label = results.label.data[0]; // 0: human, 1: ai
-                const probabilities = results.probabilities.data; // Float32Array [-prob_ai, prob_ai]
+                // 防御: 动态获取输入输出名，避免硬编码不匹配
+                const inputName = onnxSession.inputNames[0];
+                const results = await onnxSession.run({ [inputName]: tensorX });
                 
-                const probAi = probabilities[1] * 100;
-                const probHuman = (1.0 - probabilities[1]) * 100;
+                // 诊断日志: 打印实际输出名和数据类型
+                const outNames = Object.keys(results);
+                console.log('[ONNX] Output names:', outNames);
+                for (const name of outNames) {
+                    console.log('[ONNX]', name, 'dims:', results[name].dims, 'type:', results[name].type, 'data_len:', results[name].data.length);
+                }
+                
+                // ★ 获取 label 输出 (防御性: 可能是 int64/BigInt 标量)
+                const outKeys = Object.keys(results);
+                const labelKey = outKeys.find(k => k.toLowerCase().includes('label')) || outKeys[0];
+                const probKey = outKeys.find(k => k.toLowerCase().includes('prob')) || outKeys[1];
+                
+                let rawLabel = results[labelKey]?.data;
+                // 兼容 BigInt64Array / 标量张量
+                if (typeof rawLabel === 'bigint') {
+                    rawLabel = Number(rawLabel);
+                } else if (rawLabel && typeof rawLabel[0] === 'bigint') {
+                    rawLabel = Number(rawLabel[0]);
+                } else if (rawLabel && rawLabel.length !== undefined) {
+                    rawLabel = Number(rawLabel[0]);
+                } else {
+                    rawLabel = Number(rawLabel);
+                }
+                const label = rawLabel; // 0: human, 1: ai
+                
+                const probabilities = results[probKey]?.data; // Float32Array [prob_human, prob_ai]
+                // ★ 用 prob[1] 反推 prob[0]，确保两组概率严格和为 100%
+                let rawProbAi = probabilities[1];
+                if (isNaN(rawProbAi)) rawProbAi = 0.5;
+                const probAi = Math.round(rawProbAi * 10000) / 100;
+                const probHuman = Math.round((1.0 - rawProbAi) * 10000) / 100;
+                
+                console.log('[ONNX] prob(class_0=human)=', probabilities[0], 'prob(class_1=ai)=', probabilities[1],
+                    '-> ai%', probAi.toFixed(2), 'human%', probHuman.toFixed(2), 'sum%', (probAi + probHuman).toFixed(2));
                 const endTime = performance.now();
                 const totalCostSec = ((endTime - startTime) / 1000).toFixed(2);
 
@@ -1456,13 +1485,37 @@
                 showResults(file.name, sr, duration, totalCostSec, probAi, probHuman, label, features, featureOrder);
 
             } catch (err) {
-                console.error(err);
+                console.error('=== SUNO DETECTOR ERROR ===');
+                console.error('Error object:', err);
+                console.error('Error type:', typeof err);
+                console.error('Error message:', err?.message);
+                console.error('Error stack:', err?.stack);
+                if (err?.toString) console.error('Error toString:', err.toString());
+                
                 progressTitle.textContent = "检测发生故障";
                 progressPercent.textContent = "Error";
+                
                 const errDiv = document.createElement('div');
                 errDiv.style.color = '#ef4444';
-                errDiv.textContent = `[故障] 失败原因: ${err.message}`;
+                const msg = err?.message || err?.toString?.() || String(err) || '未知错误（请打开浏览器控制台 F12 查看详情）';
+                errDiv.textContent = `[故障] 失败原因: ${msg}`;
                 progressLog.appendChild(errDiv);
+                
+                // 额外诊断: 检查库是否加载成功
+                const diagDiv = document.createElement('div');
+                diagDiv.style.color = '#f59e0b';
+                diagDiv.style.fontSize = '0.68rem';
+                diagDiv.style.marginTop = '4px';
+                const libs = [];
+                if (typeof ort === 'undefined') libs.push('ONNX Runtime Web 未加载');
+                if (typeof Meyda === 'undefined') libs.push('Meyda 未加载');
+                if (!onnxSession) libs.push('ONNX 模型未载入');
+                if (libs.length > 0) {
+                    diagDiv.textContent = '[诊断] ' + libs.join('; ');
+                } else {
+                    diagDiv.textContent = '[诊断] 核心库均已加载，错误可能源于音频解码或特征提取阶段';
+                }
+                progressLog.appendChild(diagDiv);
             }
         }
 
