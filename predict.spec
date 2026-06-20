@@ -28,12 +28,13 @@ if sys.platform == 'win32':
 
 is_mac = sys.platform == 'darwin'
 app_name = 'Suno Checker' if is_mac else 'suno-checker'
+icon_file = 'app_icon.icns' if is_mac else 'app_icon.ico'
 
 a = Analysis(
     ['predict.py'],
     pathex=[],
     binaries=ort_binaries + vc_binaries,
-    datas=[('ai_music_detector.onnx', '.')],
+    datas=[('ai_music_detector.onnx', '.'), ('app_icon.png', '.')],
     hiddenimports=['fakeprint', 'scipy.ndimage._nd_image', 'scipy.ndimage._filters',
                    'scipy.special._ufuncs_cxx', 'soundfile', 'pyloudnorm'],
     hookspath=[],
@@ -65,6 +66,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon=icon_file,
 )
 
 coll = COLLECT(
@@ -81,7 +83,7 @@ if is_mac:
     app = BUNDLE(
         coll,
         name='Suno Checker.app',
-        icon=None,
+        icon='app_icon.icns',
         bundle_identifier='com.suno.checker',
     )
 

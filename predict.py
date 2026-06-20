@@ -49,7 +49,7 @@ import pyloudnorm as pyln
 
 from PyQt5.QtWidgets import QApplication, QMainWindow, QLabel, QVBoxLayout, QWidget, QTextEdit
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
-from PyQt5.QtGui import QFont
+from PyQt5.QtGui import QFont, QIcon
 
 warnings.filterwarnings("ignore", category=UserWarning)
 
@@ -467,6 +467,11 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Suno AI 音乐检测 (Fakeprint ISMIR 2025) - DanJuan v0.4")
         self.resize(480, 600)
         self.setAcceptDrops(True)
+
+        # 设置窗口图标
+        icon_path = os.path.join(get_base_dir(), 'app_icon.png')
+        if os.path.exists(icon_path):
+            self.setWindowIcon(QIcon(icon_path))
 
         # 全局深色底色
         self.setStyleSheet("""
