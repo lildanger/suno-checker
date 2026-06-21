@@ -59,7 +59,7 @@ echo -e "\033[1;33m[步骤 2/3] 正在沙盒中安装编译依赖库...\033[0m"
 pip install --upgrade pip
 # 强制安装含 Intel macOS 预编译 wheel 的版本，避免从源码编译 llvmlite 导致崩溃
 pip install "llvmlite==0.41.1" "numba==0.58.1"
-pip install pyinstaller librosa "numpy<2" scipy "onnxruntime>=1.16.3" pyqt5 pyloudnorm pillow
+pip install pyinstaller librosa "numpy<2" scipy "onnxruntime>=1.16.3" pyqt5 pyloudnorm pillow qtawesome
 
 # 4. 设置编译部署兼容目标（向后兼容至 macOS 12.0，全面覆盖 13.x 14.x 15.x 等系统）
 echo -e "\033[1;33m[步骤 3/3] 正在调用 PyInstaller 开始编译...\033[0m"
