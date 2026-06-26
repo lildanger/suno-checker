@@ -2,7 +2,21 @@
 
 基于 **ISMIR 2025 fakeprint 频谱伪影分析** 的 AI 生成音乐检测系统。可识别 Suno ≤v5、Udio ≤v1.5 等神经声码器生成的音频。提供 PyQt5 桌面 GUI 和 ONNX 模型推理。
 
-> **v0.4**：引擎为 lofcz/ai-music-detector（fakeprint + 逻辑回归），假阳性率 ~10%。
+> **最新版本 v0.4.2**：引擎为 lofcz/ai-music-detector（fakeprint + 逻辑回归），假阳性率 ~10%。
+
+---
+
+## 软件下载 (v0.4.2)
+
+> 💡 **提示：软件界面目前仅支持简体中文 (Simplified Chinese Only)。**
+
+你可以直接在 [GitHub Releases v0.4.2](https://github.com/lildanger/suno-checker/releases/tag/v0.4.2) 下载已打包好的各平台桌面客户端：
+
+* 🚀 **Windows 标准版**：[suno-checker-windows.zip](https://github.com/lildanger/suno-checker/releases/download/v0.4.2/suno-checker-windows.zip) (解压后运行，双击**秒开**，启动无延迟，**推荐**)
+* 📦 **Windows 便携版**：[suno-checker-windows-portable.zip](https://github.com/lildanger/suno-checker/releases/download/v0.4.2/suno-checker-windows-portable.zip) (单文件直接运行，但每次启动有 3-5 秒解压延迟)
+* 🍏 **macOS (Apple Silicon)**：[suno-checker-macos.M1.dmg](https://github.com/lildanger/suno-checker/releases/download/v0.4.2/suno-checker-macos.M1.dmg) (适用于 macOS 14+ 系统的 M1/M2/M3 等 ARM 芯片)
+* 💻 **macOS (Intel)**：[suno-checker-macos.intel.dmg](https://github.com/lildanger/suno-checker/releases/download/v0.4.2/suno-checker-macos.intel.dmg) (适用于 macOS 13 及以下系统的 Intel 芯片)
+* 🐧 **Linux 绿色版**：[suno-checker-linux.tar.gz](https://github.com/lildanger/suno-checker/releases/download/v0.4.2/suno-checker-linux.tar.gz) (适用于 Linux 系统的绿色解压版)
 
 ---
 
